@@ -19,6 +19,13 @@
 #include "String_.h"
 #include "Entity.h"
 
+#if defined CC_BUILD_WIN || defined CC_BUILD_WINCE
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
 cc_bool OrthoRender_Requested;
 static float ortho_pitch = -1.0f; /* -1 means "use player viewpoint" */
 static float ortho_yaw   = -1.0f;
@@ -137,38 +144,179 @@ static void OrthoRender_ComputeView(float yawDeg, float pitchDeg,
 }
 
 
-/* Box-filter (area average) downscale — averages NxN pixel blocks.
-   Produces much better quality than nearest-neighbor for downscaling. */
-static void OrthoRender_BoxDownscale(struct Bitmap* dst, struct Bitmap* src, int scale) {
-	int dx, dy, sx, sy, r, g, b, a, count;
-	int sx0, sy0, sxEnd, syEnd;
+/*########################################################################################################################*
+*----------------------------------------------Tile file I/O helpers------------------------------------------------------*
+*#########################################################################################################################*/
+/* Delete a file by its encoded platform path */
+static void OrthoRender_DeleteFile(const cc_filepath* path) {
+#if defined CC_BUILD_WIN || defined CC_BUILD_WINCE
+	DeleteFileW(path->uni);
+#else
+	unlink(path->buffer);
+#endif
+}
+
+/* Build the temp file path for a given tile coordinate */
+static void OrthoRender_TilePath(cc_string* path, cc_filepath* rawPath, int ty, int tx) {
+	String_Format2(path, "screenshots/ortho_tmp_%i_%i.raw", &ty, &tx);
+	Platform_EncodePath(rawPath, path);
+}
+
+/* Write raw tile pixel data to a temporary file */
+static cc_result OrthoRender_WriteTileRaw(int ty, int tx, BitmapCol* pixels, int tileW, int tileH) {
+	cc_string path; char pathBuf[FILENAME_SIZE];
+	cc_filepath rawPath;
+	struct Stream stream;
+	cc_result res;
+
+	String_InitArray(path, pathBuf);
+	OrthoRender_TilePath(&path, &rawPath, ty, tx);
+
+	res = Stream_CreatePath(&stream, &rawPath);
+	if (res) return res;
+
+	res = Stream_Write(&stream, (const cc_uint8*)pixels,
+		(cc_uint32)tileW * tileH * BITMAPCOLOR_SIZE);
+	stream.Close(&stream);
+	return res;
+}
+
+/* Delete all temporary tile files */
+static void OrthoRender_CleanupTileFiles(int numTilesY, int numTilesX) {
+	cc_string path; char pathBuf[FILENAME_SIZE];
+	cc_filepath rawPath;
+	int ty, tx;
+
+	for (ty = 0; ty < numTilesY; ty++) {
+		for (tx = 0; tx < numTilesX; tx++) {
+			String_InitArray(path, pathBuf);
+			OrthoRender_TilePath(&path, &rawPath, ty, tx);
+			OrthoRender_DeleteFile(&rawPath);
+		}
+	}
+}
+
+
+/*########################################################################################################################*
+*-----------------------------------------Iterative image assembly from tiles---------------------------------------------*
+*#########################################################################################################################*/
+/* Context passed to the PNG row getter for iterative encoding */
+struct OrthoRowCtx {
+	BitmapCol* stripBuf;   /* imgW * tileH pixels — one horizontal strip */
+	BitmapCol* tileBuf;    /* tileW * tileH pixels — for reading one tile file */
+	int imgW, imgH;
+	int tileW, tileH;
+	int numTilesX;
+	int loadedTileRow;     /* which ty is currently in stripBuf (-1 = none) */
+	cc_result error;       /* set if file I/O fails during load */
+};
+
+/* Load all tile files for a given tile row into the strip buffer */
+static void OrthoRender_LoadTileRow(struct OrthoRowCtx* ctx, int ty) {
+	int tx, tw, th, row;
+	cc_string path; char pathBuf[FILENAME_SIZE];
+	cc_filepath rawPath;
+	struct Stream stream;
+	cc_result res;
+
+	th = min(ctx->tileH, ctx->imgH - ty * ctx->tileH);
+	Mem_Set(ctx->stripBuf, 0, (cc_uint32)ctx->imgW * ctx->tileH * BITMAPCOLOR_SIZE);
+
+	for (tx = 0; tx < ctx->numTilesX; tx++) {
+		tw = min(ctx->tileW, ctx->imgW - tx * ctx->tileW);
+
+		String_InitArray(path, pathBuf);
+		OrthoRender_TilePath(&path, &rawPath, ty, tx);
+
+		res = Stream_OpenPath(&stream, &rawPath);
+		if (res) { ctx->error = res; return; }
+
+		res = Stream_Read(&stream, (cc_uint8*)ctx->tileBuf,
+			(cc_uint32)ctx->tileW * ctx->tileH * BITMAPCOLOR_SIZE);
+		stream.Close(&stream);
+		if (res) { ctx->error = res; return; }
+
+		/* Copy valid portion (tw x th) into the strip */
+		for (row = 0; row < th; row++) {
+			BitmapCol* src = ctx->tileBuf + row * ctx->tileW;
+			BitmapCol* dst = ctx->stripBuf + row * ctx->imgW + tx * ctx->tileW;
+			Mem_Copy(dst, src, tw * BITMAPCOLOR_SIZE);
+		}
+	}
+
+	ctx->loadedTileRow = ty;
+}
+
+/* PNG row getter: returns the requested row from the tile-backed strip buffer.
+   Loads the appropriate tile row from disk on demand. */
+static BitmapCol* OrthoRender_GetRow(struct Bitmap* bmp, int y, void* ctx) {
+	struct OrthoRowCtx* c = (struct OrthoRowCtx*)ctx;
+	int ty = y / c->tileH;
+
+	if (ty != c->loadedTileRow && !c->error) {
+		OrthoRender_LoadTileRow(c, ty);
+	}
+
+	return c->stripBuf + (y % c->tileH) * c->imgW;
+}
+
+/* Build a 1/4-scale small image from the tile files using the row context.
+   Allocates fourRows (4 * imgW pixels) to stage source rows for averaging,
+   so we never need the full image in memory. */
+static void OrthoRender_BuildSmallImage(struct OrthoRowCtx* ctx,
+	struct Bitmap* smallBmp, int imgW, int imgH) {
+	BitmapCol* fourRows;
 	BitmapCol pixel;
+	int smallW = imgW / 4, smallH = imgH / 4;
+	int dx, dy, i, j, sy, ty;
+	int r, g, b, count;
 
-	for (dy = 0; dy < dst->height; dy++) {
-		for (dx = 0; dx < dst->width; dx++) {
-			sx0 = dx * scale;
-			sy0 = dy * scale;
-			sxEnd = sx0 + scale; if (sxEnd > src->width)  sxEnd = src->width;
-			syEnd = sy0 + scale; if (syEnd > src->height) syEnd = src->height;
+	if (smallW <= 0 || smallH <= 0) return;
 
-			r = 0; g = 0; b = 0; a = 0; count = 0;
-			for (sy = sy0; sy < syEnd; sy++) {
-				for (sx = sx0; sx < sxEnd; sx++) {
-					pixel = Bitmap_GetPixel(src, sx, sy);
+	fourRows = (BitmapCol*)Mem_TryAlloc(imgW * 4, BITMAPCOLOR_SIZE);
+	if (!fourRows) return;
+
+	smallBmp->width  = smallW;
+	smallBmp->height = smallH;
+	smallBmp->scan0  = (BitmapCol*)Mem_TryAlloc(smallW * smallH, BITMAPCOLOR_SIZE);
+	if (!smallBmp->scan0) { Mem_Free(fourRows); return; }
+
+	for (dy = 0; dy < smallH; dy++) {
+		int sy0 = dy * 4;
+
+		/* Copy 4 source rows into fourRows buffer (handles tile-row boundaries) */
+		for (i = 0; i < 4 && sy0 + i < imgH; i++) {
+			sy = sy0 + i;
+			ty = sy / ctx->tileH;
+			if (ty != ctx->loadedTileRow && !ctx->error) {
+				OrthoRender_LoadTileRow(ctx, ty);
+			}
+			if (ctx->error) goto done;
+			Mem_Copy(fourRows + i * imgW,
+				ctx->stripBuf + (sy % ctx->tileH) * ctx->imgW,
+				imgW * BITMAPCOLOR_SIZE);
+		}
+
+		/* Box-average each 4x4 block */
+		for (dx = 0; dx < smallW; dx++) {
+			int sx0 = dx * 4;
+			r = 0; g = 0; b = 0; count = 0;
+			for (i = 0; i < 4 && sy0 + i < imgH; i++) {
+				for (j = 0; j < 4 && sx0 + j < imgW; j++) {
+					pixel = fourRows[i * imgW + sx0 + j];
 					r += BitmapCol_R(pixel);
 					g += BitmapCol_G(pixel);
 					b += BitmapCol_B(pixel);
-					a += BitmapCol_A(pixel);
 					count++;
 				}
 			}
-
-			if (count > 0) {
-				r /= count; g /= count; b /= count; a /= count;
-			}
-			Bitmap_GetPixel(dst, dx, dy) = BitmapCol_Make(r, g, b, a);
+			if (count > 0) { r /= count; g /= count; b /= count; }
+			Bitmap_GetPixel(smallBmp, dx, dy) = BitmapCol_Make(r, g, b, 255);
 		}
 	}
+
+done:
+	Mem_Free(fourRows);
 }
 
 
@@ -322,7 +470,7 @@ static void OrthoRender_RenderTile(struct Matrix* view, struct Matrix* proj,
 void OrthoRender_Execute(void) {
 	struct Matrix savedProj, savedView;
 	struct Matrix view, proj;
-	struct Bitmap fullBmp, tileBmp;
+	struct Bitmap tileBmp, outBmp;
 	BitmapCol* tilePixels;
 	Vec3 savedCamPos;
 	struct Entity* e;
@@ -332,11 +480,12 @@ void OrthoRender_Execute(void) {
 	float tLeft, tRight, tBottom, tTop;
 	int imgW, imgH, tileW, tileH;
 	int numTilesX, numTilesY, tx, ty;
-	int px0, py0, tw, th, row;
+	int px0, py0;
 	int savedViewDist, savedMaxViewDist;
 	int pxPerBlock, neededDist;
 	cc_bool savedFog, renderSky, renderClouds;
 
+	struct OrthoRowCtx rowCtx;
 	cc_string filename; char fileBuffer[STRING_SIZE];
 	cc_string path;     char pathBuffer[FILENAME_SIZE];
 	struct cc_datetime now;
@@ -376,17 +525,9 @@ void OrthoRender_Execute(void) {
 		return;
 	}
 
-	Chat_Add2("&eOrthoRender: &fRendering %i x %i image...", &imgW, &imgH);
+	if (!Utils_EnsureDirectory("screenshots")) return;
 
-	/* Allocate full output bitmap */
-	fullBmp.width  = imgW;
-	fullBmp.height = imgH;
-	fullBmp.scan0  = (BitmapCol*)Mem_TryAlloc(imgW * imgH, BITMAPCOLOR_SIZE);
-	if (!fullBmp.scan0) {
-		Chat_AddRaw("&eOrthoRender: &cOut of memory for output image");
-		return;
-	}
-	Mem_Set(fullBmp.scan0, 0, Bitmap_DataSize(imgW, imgH));
+	Chat_Add2("&eOrthoRender: &fRendering %i x %i image...", &imgW, &imgH);
 
 	/* Save state */
 	savedProj       = Gfx.Projection;
@@ -424,17 +565,14 @@ void OrthoRender_Execute(void) {
 	tilePixels = (BitmapCol*)Mem_TryAlloc(tileW * tileH, BITMAPCOLOR_SIZE);
 	if (!tilePixels) {
 		Chat_AddRaw("&eOrthoRender: &cOut of memory for tile buffer");
-		Mem_Free(fullBmp.scan0);
 		goto restore;
 	}
 
-	/* Render each tile */
+	/* Phase 1: Render each tile and write raw pixel data to disk */
 	for (ty = 0; ty < numTilesY; ty++) {
 		for (tx = 0; tx < numTilesX; tx++) {
 			px0 = tx * tileW;
 			py0 = ty * tileH;
-			tw  = min(tileW, imgW - px0);
-			th  = min(tileH, imgH - py0);
 
 			/* Compute ortho bounds for this tile.
 			   Image Y increases downward; view Y increases upward.
@@ -461,24 +599,38 @@ void OrthoRender_Execute(void) {
 			if (res) {
 				Chat_AddRaw("&eOrthoRender: &cFailed to read backbuffer");
 				Mem_Free(tilePixels);
-				Mem_Free(fullBmp.scan0);
+				OrthoRender_CleanupTileFiles(numTilesY, numTilesX);
 				goto restore;
 			}
 
-			/* Copy only the valid tw x th portion to output bitmap */
-			for (row = 0; row < th; row++) {
-				BitmapCol* dst = Bitmap_GetRow(&fullBmp, py0 + row) + px0;
-				BitmapCol* src = Bitmap_GetRow(&tileBmp, row);
-				Mem_Copy(dst, src, tw * BITMAPCOLOR_SIZE);
+			/* Write tile pixels to a temporary raw file */
+			res = OrthoRender_WriteTileRaw(ty, tx, tilePixels, tileW, tileH);
+			if (res) {
+				Chat_AddRaw("&eOrthoRender: &cFailed to write tile to disk");
+				Mem_Free(tilePixels);
+				OrthoRender_CleanupTileFiles(numTilesY, numTilesX);
+				goto restore;
 			}
 		}
 	}
 
-	Mem_Free(tilePixels);
+	/* Phase 2: Iteratively build the final PNG from tile files.
+	   Only a strip of imgW * tileH pixels is held in memory at once,
+	   instead of the entire imgW * imgH output. */
+	rowCtx.tileW     = tileW;
+	rowCtx.tileH     = tileH;
+	rowCtx.imgW      = imgW;
+	rowCtx.imgH      = imgH;
+	rowCtx.numTilesX = numTilesX;
+	rowCtx.loadedTileRow = -1;
+	rowCtx.error     = 0;
+	rowCtx.tileBuf   = tilePixels;  /* reuse the tile buffer for reading */
+	rowCtx.stripBuf  = (BitmapCol*)Mem_TryAlloc((cc_uint32)imgW * tileH, BITMAPCOLOR_SIZE);
 
-	/* Save PNG */
-	if (!Utils_EnsureDirectory("screenshots")) {
-		Mem_Free(fullBmp.scan0);
+	if (!rowCtx.stripBuf) {
+		Chat_AddRaw("&eOrthoRender: &cOut of memory for image assembly strip");
+		Mem_Free(tilePixels);
+		OrthoRender_CleanupTileFiles(numTilesY, numTilesX);
 		goto restore;
 	}
 
@@ -494,15 +646,26 @@ void OrthoRender_Execute(void) {
 	res = Stream_CreatePath(&stream, &raw_path);
 	if (res) {
 		Logger_IOWarn2(res, "creating", &raw_path);
-		Mem_Free(fullBmp.scan0);
+		Mem_Free(rowCtx.stripBuf);
+		Mem_Free(tilePixels);
+		OrthoRender_CleanupTileFiles(numTilesY, numTilesX);
 		goto restore;
 	}
 
-	res = Png_Encode(&fullBmp, &stream, NULL, false, NULL);
+	/* Encode the PNG row-by-row via the row getter, which loads
+	   tile strips from disk on demand */
+	outBmp.width  = imgW;
+	outBmp.height = imgH;
+	outBmp.scan0  = NULL; /* not used — row getter provides rows */
+
+	res = Png_Encode(&outBmp, &stream, OrthoRender_GetRow, false, &rowCtx);
+	if (!res) res = rowCtx.error;
 	if (res) {
 		Logger_IOWarn2(res, "saving to", &raw_path);
 		stream.Close(&stream);
-		Mem_Free(fullBmp.scan0);
+		Mem_Free(rowCtx.stripBuf);
+		Mem_Free(tilePixels);
+		OrthoRender_CleanupTileFiles(numTilesY, numTilesX);
 		goto restore;
 	}
 
@@ -513,7 +676,7 @@ void OrthoRender_Execute(void) {
 		Chat_Add1("&eOrthoRender: &fSaved as %s", &filename);
 	}
 
-	/* Save 1/4 size small copy */
+	/* Phase 3: Build 1/4-scale small copy from tile files */
 	{
 		struct Bitmap smallBmp;
 		cc_string smallName; char smallNameBuf[STRING_SIZE];
@@ -521,36 +684,39 @@ void OrthoRender_Execute(void) {
 		cc_filepath smallRawPath;
 		struct Stream smallStream;
 
-		smallBmp.width  = imgW / 4;
-		smallBmp.height = imgH / 4;
-		if (smallBmp.width > 0 && smallBmp.height > 0) {
-			smallBmp.scan0 = (BitmapCol*)Mem_TryAlloc(smallBmp.width * smallBmp.height, BITMAPCOLOR_SIZE);
-			if (smallBmp.scan0) {
-				OrthoRender_BoxDownscale(&smallBmp, &fullBmp, 4);
+		smallBmp.scan0 = NULL;
+		rowCtx.loadedTileRow = -1;  /* reset for second pass */
+		rowCtx.error = 0;
 
-				String_InitArray(smallName, smallNameBuf);
-				String_Format3(&smallName, "ortho_%p4-%p2-%p2", &now.year, &now.month, &now.day);
-				String_Format3(&smallName, "-%p2-%p2-%p2_small.png", &now.hour, &now.minute, &now.second);
+		OrthoRender_BuildSmallImage(&rowCtx, &smallBmp, imgW, imgH);
 
-				String_InitArray(smallPath, smallPathBuf);
-				String_Format1(&smallPath, "screenshots/%s", &smallName);
+		if (smallBmp.scan0 && !rowCtx.error) {
+			String_InitArray(smallName, smallNameBuf);
+			String_Format3(&smallName, "ortho_%p4-%p2-%p2", &now.year, &now.month, &now.day);
+			String_Format3(&smallName, "-%p2-%p2-%p2_small.png", &now.hour, &now.minute, &now.second);
 
-				Platform_EncodePath(&smallRawPath, &smallPath);
-				res = Stream_CreatePath(&smallStream, &smallRawPath);
-				if (!res) {
-					res = Png_Encode(&smallBmp, &smallStream, NULL, false, NULL);
-					if (res) Logger_IOWarn2(res, "saving to", &smallRawPath);
-					smallStream.Close(&smallStream);
-					if (!res) Chat_Add1("&eOrthoRender: &fSaved small as %s", &smallName);
-				} else {
-					Logger_IOWarn2(res, "creating", &smallRawPath);
-				}
-				Mem_Free(smallBmp.scan0);
+			String_InitArray(smallPath, smallPathBuf);
+			String_Format1(&smallPath, "screenshots/%s", &smallName);
+
+			Platform_EncodePath(&smallRawPath, &smallPath);
+			res = Stream_CreatePath(&smallStream, &smallRawPath);
+			if (!res) {
+				res = Png_Encode(&smallBmp, &smallStream, NULL, false, NULL);
+				if (res) Logger_IOWarn2(res, "saving to", &smallRawPath);
+				smallStream.Close(&smallStream);
+				if (!res) Chat_Add1("&eOrthoRender: &fSaved small as %s", &smallName);
+			} else {
+				Logger_IOWarn2(res, "creating", &smallRawPath);
 			}
 		}
+		if (smallBmp.scan0) Mem_Free(smallBmp.scan0);
 	}
 
-	Mem_Free(fullBmp.scan0);
+	Mem_Free(rowCtx.stripBuf);
+	Mem_Free(tilePixels);
+
+	/* Phase 4: Clean up temporary tile files */
+	OrthoRender_CleanupTileFiles(numTilesY, numTilesX);
 
 restore:
 	/* Restore all state */
