@@ -41,6 +41,7 @@
 #include "SystemFonts.h"
 #include "Formats.h"
 #include "EntityRenderers.h"
+#include "OrthoRender.h"
 
 struct _GameData Game;
 static cc_uint64 frameStart;
@@ -486,6 +487,7 @@ static void Game_Load(void) {
 	Game_AddComponent(&AxisLinesRenderer_Component);
 	Game_AddComponent(&Formats_Component);
 	Game_AddComponent(&EntityRenderers_Component);
+	Game_AddComponent(&OrthoRender_Component);
 
 	LoadPlugins();
 	for (comp = comps_head; comp; comp = comp->next) {
@@ -858,6 +860,7 @@ void Game_RenderFrame(void) {
 #endif
 
 	if (Game_ScreenshotRequested) Game_TakeScreenshot();
+	if (OrthoRender_Requested)   OrthoRender_Execute();
 	Gfx_EndFrame();
 	if (gfx_minFrameMs != 0.0f) LimitFPS();
 }

@@ -297,6 +297,9 @@ static GfxResourceID skybox_tex, skybox_vb;
 #define SKYBOX_COUNT (6 * 4)
 cc_bool EnvRenderer_ShouldRenderSkybox(void) { return skybox_tex && !EnvRenderer_Minimal; }
 
+GfxResourceID EnvRenderer_GetCloudsTex(void) { return clouds_tex; }
+GfxResourceID EnvRenderer_GetSkyboxTex(void) { return skybox_tex; }
+
 static CC_NOINLINE void BuildSkybox(void) {
 	static const struct VertexTextured vertices[SKYBOX_COUNT] = {
 		/* Front quad */

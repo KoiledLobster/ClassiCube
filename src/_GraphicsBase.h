@@ -279,6 +279,14 @@ void Gfx_End2D(void) {
 }
 #endif
 
+/* Default stub for backends that don't implement Gfx_ReadBackbuffer */
+/* GL and D3D backends provide their own implementations */
+#if CC_GFX_BACKEND != CC_GFX_BACKEND_GL1 && CC_GFX_BACKEND != CC_GFX_BACKEND_GL2 && \
+    CC_GFX_BACKEND != CC_GFX_BACKEND_GL11 && CC_GFX_BACKEND != CC_GFX_BACKEND_D3D9 && \
+    CC_GFX_BACKEND != CC_GFX_BACKEND_D3D11
+cc_result Gfx_ReadBackbuffer(struct Bitmap* bmp) { return ERR_NOT_SUPPORTED; }
+#endif
+
 
 /*########################################################################################################################*
 *--------------------------------------------------------Misc/Utils-------------------------------------------------------*

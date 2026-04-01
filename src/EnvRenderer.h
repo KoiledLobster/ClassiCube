@@ -47,5 +47,10 @@ void EnvRenderer_SetMode(int flags);
 /* mode can be: normal, normalfast, legacy, legacyfast */
 CC_NOINLINE int EnvRenderer_CalcFlags(const cc_string* mode);
 
+/* Returns the cloud texture ID (0 if none loaded). */
+GfxResourceID EnvRenderer_GetCloudsTex(void);
+/* Returns the skybox texture ID (0 if none loaded). */
+GfxResourceID EnvRenderer_GetSkyboxTex(void);
+
 CC_END_HEADER
 #endif

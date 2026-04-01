@@ -359,6 +359,30 @@ cc_result Gfx_TakeScreenshot(struct Stream* output) {
 	return res;
 }
 
+cc_result Gfx_ReadBackbuffer(struct Bitmap* bmp) {
+	int y;
+	BitmapCol* rowA;
+	BitmapCol* rowB;
+	BitmapCol* temp;
+
+	_glReadPixels(0, 0, bmp->width, bmp->height, PIXEL_FORMAT, TRANSFER_FORMAT, bmp->scan0);
+
+	/* OpenGL reads bottom-up, so flip to top-down order */
+	temp = (BitmapCol*)Mem_TryAlloc(bmp->width, BITMAPCOLOR_SIZE);
+	if (!temp) return ERR_OUT_OF_MEMORY;
+
+	for (y = 0; y < bmp->height / 2; y++) {
+		rowA = Bitmap_GetRow(bmp, y);
+		rowB = Bitmap_GetRow(bmp, bmp->height - 1 - y);
+		Mem_Copy(temp, rowA, bmp->width * BITMAPCOLOR_SIZE);
+		Mem_Copy(rowA, rowB, bmp->width * BITMAPCOLOR_SIZE);
+		Mem_Copy(rowB, temp, bmp->width * BITMAPCOLOR_SIZE);
+	}
+
+	Mem_Free(temp);
+	return 0;
+}
+
 static void AppendVRAMStats(cc_string* info) {
 	static const cc_string memExt = String_FromConst("GL_NVX_gpu_memory_info");
 	GLint totalKb, curKb;

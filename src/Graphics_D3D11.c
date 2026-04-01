@@ -1203,6 +1203,48 @@ finished:
 	return hr;
 }
 
+cc_result Gfx_ReadBackbuffer(struct Bitmap* bmp) {
+	ID3D11Texture2D* tmp = NULL;
+	HRESULT hr;
+	int y;
+
+	ID3D11Resource* backbuffer_res;
+	D3D11_MAPPED_SUBRESOURCE buffer;
+	ID3D11RenderTargetView_GetResource(backbuffer, &backbuffer_res);
+
+	D3D11_TEXTURE2D_DESC desc = { 0 };
+	desc.Width     = bmp->width;
+	desc.Height    = bmp->height;
+	desc.MipLevels = 1;
+	desc.ArraySize = 1;
+	desc.Format    = DXGI_FORMAT_B8G8R8A8_UNORM;
+	desc.SampleDesc.Count = 1;
+	desc.Usage     = D3D11_USAGE_STAGING;
+	desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+	hr = ID3D11Device_CreateTexture2D(device, &desc, NULL, &tmp);
+	if (hr) goto finished;
+	ID3D11DeviceContext_CopyResource(context, (ID3D11Resource*)tmp, backbuffer_res);
+
+	hr = ID3D11DeviceContext_Map(context, (ID3D11Resource*)tmp, 0,
+									D3D11_MAP_READ, 0, &buffer);
+	if (hr) goto finished;
+	{
+		/* Copy rows (RowPitch may differ from width * pixelSize) */
+		for (y = 0; y < bmp->height; y++) {
+			BitmapCol* src = (BitmapCol*)((char*)buffer.pData + y * buffer.RowPitch);
+			BitmapCol* dst = Bitmap_GetRow(bmp, y);
+			Mem_Copy(dst, src, bmp->width * BITMAPCOLOR_SIZE);
+		}
+	}
+	ID3D11DeviceContext_Unmap(context, (ID3D11Resource*)tmp, 0);
+
+finished:
+	if (tmp) { ID3D11Texture2D_Release(tmp); }
+	ID3D11Resource_Release(backbuffer_res);
+	return hr;
+}
+
 void Gfx_SetVSync(cc_bool vsync) {
 	gfx_vsync = vsync;
 }

@@ -77,6 +77,10 @@ void MapRenderer_RefreshChunk(int cx, int cy, int cz);
 void MapRenderer_OnBlockChanged(int x, int y, int z, BlockID block);
 /* Deletes all chunks and resets internal state. */
 void MapRenderer_Refresh(void);
+/* Forces all chunk face draw flags to true (for orthographic rendering). */
+void MapRenderer_SetAllFacesVisible(void);
+/* Builds all dirty chunks and marks them all as visible (for orthographic rendering). */
+void MapRenderer_BuildAllChunks(void);
 
 CC_END_HEADER
 #endif

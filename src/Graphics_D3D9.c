@@ -843,6 +843,43 @@ finished:
 	return res;
 }
 
+cc_result Gfx_ReadBackbuffer(struct Bitmap* bmp) {
+	IDirect3DSurface9* backbuffer = NULL;
+	IDirect3DSurface9* temp = NULL;
+	D3DSURFACE_DESC desc;
+	D3DLOCKED_RECT rect;
+	cc_result res;
+	int y;
+
+	res = IDirect3DDevice9_GetBackBuffer(device, 0, 0, D3DBACKBUFFER_TYPE_MONO, &backbuffer);
+	if (res) goto finished;
+	res = IDirect3DSurface9_GetDesc(backbuffer, &desc);
+	if (res) goto finished;
+
+	res = IDirect3DDevice9_CreateOffscreenPlainSurface(device, desc.Width, desc.Height,
+		D3DFMT_X8R8G8B8, D3DPOOL_SYSTEMMEM, &temp, NULL);
+	if (res) goto finished;
+	res = IDirect3DDevice9_GetRenderTargetData(device, backbuffer, temp);
+	if (res) goto finished;
+
+	res = IDirect3DSurface9_LockRect(temp, &rect, NULL, D3DLOCK_READONLY | D3DLOCK_NO_DIRTY_UPDATE);
+	if (res) goto finished;
+	{
+		/* D3D9 stores top-down; copy rows (pitch may differ from width) */
+		for (y = 0; y < bmp->height; y++) {
+			BitmapCol* src = (BitmapCol*)((char*)rect.pBits + y * rect.Pitch);
+			BitmapCol* dst = Bitmap_GetRow(bmp, y);
+			Mem_Copy(dst, src, bmp->width * BITMAPCOLOR_SIZE);
+		}
+	}
+	IDirect3DSurface9_UnlockRect(temp);
+
+finished:
+	D3D9_FreeResource(backbuffer);
+	D3D9_FreeResource(temp);
+	return res;
+}
+
 static void UpdateSwapchain(const char* reason) {
 	/* TODO: Can Direct3D9Ex fast path still be used here? */
 	Gfx_LoseContext(reason);

@@ -502,6 +502,17 @@ void MapRenderer_Refresh(void) {
 	ResetPartCounts();
 }
 
+void MapRenderer_SetAllFacesVisible(void) {
+	int i;
+	if (!mapChunks) return;
+
+	for (i = 0; i < chunksCount; i++) {
+		mapChunks[i].drawXMin = true; mapChunks[i].drawXMax = true;
+		mapChunks[i].drawZMin = true; mapChunks[i].drawZMax = true;
+		mapChunks[i].drawYMin = true; mapChunks[i].drawYMax = true;
+	}
+}
+
 /* Refreshes chunks on the border of the map whose y is less than 'maxHeight'. */
 static void RefreshBorderChunks(int maxHeight) {
 	int cx, cy, cz;
@@ -699,6 +710,36 @@ void MapRenderer_Update(float delta) {
 	if (!mapChunks) return;
 	UpdateSortOrder();
 	UpdateChunks(delta);
+}
+
+void MapRenderer_BuildAllChunks(void) {
+	int i, chunkUpdates = 0;
+	struct ChunkInfo* info;
+	if (!mapChunks || !World.Blocks) return;
+
+	/* Build all dirty chunks regardless of distance limits */
+	for (i = 0; i < chunksCount; i++) {
+		info = &mapChunks[i];
+		if (info->dirty && !info->empty) {
+			DeleteChunk(info);
+			BuildChunk(info, &chunkUpdates);
+		}
+	}
+
+	/* Populate renderChunks with ALL non-empty chunks as visible */
+	renderChunksCount = 0;
+	for (i = 0; i < chunksCount; i++) {
+		info = &mapChunks[i];
+		if (!info->empty) {
+			info->visible = true;
+			renderChunks[renderChunksCount] = info;
+			renderChunksCount++;
+		}
+	}
+	ResetPartFlags();
+
+	/* Force chunkPos invalid so next normal Update recalculates everything */
+	chunkPos = IVec3_MaxValue();
 }
 
 

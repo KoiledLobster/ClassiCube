@@ -443,6 +443,9 @@ CC_API void Gfx_SetScissor (int x, int y, int w, int h);
 *#########################################################################################################################*/
 /* Outputs a .png screenshot of the backbuffer */
 cc_result Gfx_TakeScreenshot(struct Stream* output);
+/* Reads backbuffer pixels into an already-allocated Bitmap (top-down row order) */
+/* NOTE: bmp->width, bmp->height, and bmp->scan0 must be set before calling */
+cc_result Gfx_ReadBackbuffer(struct Bitmap* bmp);
 /* Warns in chat if the graphics backend has problems with the user's GPU */
 /* Returns whether legacy rendering mode for borders/sky/clouds is needed */
 cc_bool Gfx_WarnIfNecessary(void);
