@@ -10,6 +10,7 @@
 #include "Bitmap.h"
 #include "Chat.h"
 #include "Logger.h"
+#include "Errors.h"
 
 struct _GfxData Gfx;
 static GfxResourceID Gfx_quadVb, Gfx_texVb;
