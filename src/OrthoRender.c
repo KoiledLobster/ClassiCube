@@ -19,12 +19,7 @@
 #include "String_.h"
 #include "Entity.h"
 
-#if defined CC_BUILD_WIN || defined CC_BUILD_WINCE
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
+#include <stdio.h>
 
 cc_bool OrthoRender_Requested;
 static float ortho_pitch = -1.0f; /* -1 means "use player viewpoint" */
@@ -150,9 +145,9 @@ static void OrthoRender_ComputeView(float yawDeg, float pitchDeg,
 /* Delete a file by its encoded platform path */
 static void OrthoRender_DeleteFile(const cc_filepath* path) {
 #if defined CC_BUILD_WIN || defined CC_BUILD_WINCE
-	DeleteFileW(path->uni);
+	remove(path->ansi);
 #else
-	unlink(path->buffer);
+	remove(path->buffer);
 #endif
 }
 
