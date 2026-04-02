@@ -104,9 +104,13 @@ static void FreePalettes(void) {
 }
 static void CalcAngledShadows(int xStart, int zStart, int xWidth, int zLength);
 static void AllocState_Angled(void) {
+	int i, count;
 	if (Lighting_Mode != LIGHTING_MODE_ANGLED) return;
 
-	blockers = (int*)Mem_AllocCleared((World.Width + World.Height) * (World.Length + World.Height), sizeof(int), "angled lighting heightmap");
+	count = (World.Width + World.Height) * (World.Length + World.Height);
+	blockers = (int*)Mem_Alloc(count, sizeof(int), "angled lighting heightmap");
+	/* Seed with EdgeHeight: diagonals that never find a blocker still shadow blocks below water */
+	for (i = 0; i < count; i++) blockers[i] = Env.EdgeHeight;
 
 	CalcAngledShadows(0, 0, World.Width, World.Length);
 }
@@ -201,8 +205,8 @@ static void CalcAngledShadows_Old(int xStart, int zStart, int xWidth, int zLengt
 				zSafe = (zD > 0) ? zD - 1 : zD;
 			}
 
-			//We searched all the way down the diagonal column and hit nothing, meaning we don't need to add any shadow blocker here, go next cell
-			if (xD < 0 || zD < 0) continue;
+			/* No blocker found — leave seed value (EdgeHeight) intact */
+			if (xD < 0 || zD < 0 || y == 0) continue;
 
 
 			blockers[x + z * xExtent] = y;
@@ -297,8 +301,8 @@ static void CalcAngledShadows(int xStart, int zStart, int xWidth, int zLength) {
                 zSafe = (zD > 0) ? zD - 1 : zD;
             }
 
-            //We searched all the way down the diagonal column and hit nothing, meaning we don't need to add any shadow blocker here, go next cell
-            if (xD < 0 || zD < 0) continue;
+            /* No blocker found — leave seed value (EdgeHeight) intact */
+            if (xD < 0 || zD < 0 || y == 0) continue;
 
 
             blockers[x + z * xExtent] = y;  
@@ -680,16 +684,17 @@ static void Refresh(void) {
 static cc_bool IsLit(int x, int y, int z) { return ClassicLighting_IsLit(x, y, z); }
 static cc_bool IsLit_Fast(int x, int y, int z) { return ClassicLighting_IsLit_Fast(x, y, z); }
 static cc_bool IsLit_Angled(int x, int y, int z) {
-	/* Test */
-    return !(
-		x >= 0 &&
-		y >= 0 &&
-		z >= 0 &&
-		x < World.Width &&
-		y < World.Height &&
-		z < World.Length
-		) ||
-		y >= blockers[(x + World.Height -y) + (z + World.Height -y) * (World.Width + World.Height)];
+	if (!(x >= 0 && y >= 0 && z >= 0 && x < World.Width && y < World.Height && z < World.Length))
+		return 1; /* OOB = lit */
+
+	/* The shadow map diagonal for any block at x=MaxX or z=MaxZ starts AT that
+	   block's own y, so blockers can never exceed y — IsLit would always be true.
+	   Nothing outside the map can cast a shadow here, so fall back to the global
+	   EdgeHeight baseline (same rule as classic lighting). */
+	if (x == World.MaxX || z == World.MaxZ)
+		return y >= Env.EdgeHeight;
+
+	return y >= blockers[(x + World.Height - y) + (z + World.Height - y) * (World.Width + World.Height)];
 }
 static cc_bool IsLit_Fast_Angled(int x, int y, int z) {
 	return IsLit_Angled(x, y, z);

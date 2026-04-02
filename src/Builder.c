@@ -570,11 +570,11 @@ static PackedCol Normal_LightColor(int x, int y, int z, Face face, BlockID block
 	case FACE_XMIN:
 		return x < offset                ? Env.SunXSide : Lighting.Color_XSide_Fast(x - offset, y, z);
 	case FACE_XMAX:
-		return x > (World.MaxX - offset) ? Env.SunXSide : Lighting.Color_XSide_Fast(x + offset, y, z);
+		return Lighting.Color_XSide_Fast(min(x + offset, World.MaxX), y, z);
 	case FACE_ZMIN:
 		return z < offset                ? Env.SunZSide : Lighting.Color_ZSide_Fast(x, y, z - offset);
 	case FACE_ZMAX:
-		return z > (World.MaxZ - offset) ? Env.SunZSide : Lighting.Color_ZSide_Fast(x, y, z + offset);
+		return Lighting.Color_ZSide_Fast(x, y, min(z + offset, World.MaxZ));
 
 	case FACE_YMIN:
 		return Lighting.Color_YMin_Fast(x, y - offset, z);		
@@ -709,7 +709,7 @@ static void NormalBuilder_RenderBlock(int index, int x, int y, int z) {
 		part   = &Builder_Parts[baseOffset + Atlas1D_Index(loc)];
 
 		col = fullBright ? PACKEDCOL_WHITE :
-			x <= (World.MaxX - offset) ? Lighting.Color_XSide_Fast(x + offset, y, z) : Env.SunXSide;
+			Lighting.Color_XSide_Fast(min(x + offset, World.MaxX), y, z);
 		Drawer_XMax(count_XMax, col, loc, &part->faces.vertices[FACE_XMAX]);
 	}
 
@@ -729,7 +729,7 @@ static void NormalBuilder_RenderBlock(int index, int x, int y, int z) {
 		part   = &Builder_Parts[baseOffset + Atlas1D_Index(loc)];
 
 		col = fullBright ? PACKEDCOL_WHITE :
-			z <= (World.MaxZ - offset) ? Lighting.Color_ZSide_Fast(x, y, z + offset) : Env.SunZSide;
+			Lighting.Color_ZSide_Fast(x, y, min(z + offset, World.MaxZ));
 		Drawer_ZMax(count_ZMax, col, loc, &part->faces.vertices[FACE_ZMAX]);
 	}
 
