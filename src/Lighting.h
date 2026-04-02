@@ -14,7 +14,7 @@ struct IGameComponent;
 extern struct IGameComponent Lighting_Component;
 
 enum LightingMode {
-	LIGHTING_MODE_CLASSIC, LIGHTING_MODE_FANCY, LIGHTING_MODE_COUNT
+	LIGHTING_MODE_CLASSIC, LIGHTING_MODE_FANCY, LIGHTING_MODE_ANGLED, LIGHTING_MODE_COUNT
 };
 extern const char* const LightingMode_Names[LIGHTING_MODE_COUNT];
 extern cc_uint8 Lighting_Mode;
@@ -72,6 +72,8 @@ CC_VAR extern struct _Lighting {
 	PackedCol (*Color_YMin_Fast)(int x, int y, int z);
 	PackedCol (*Color_XSide_Fast)(int x, int y, int z);
 	PackedCol (*Color_ZSide_Fast)(int x, int y, int z);
+	PackedCol (*Color_XSideMin_Fast)(int x, int y, int z);
+	PackedCol (*Color_ZSideMin_Fast)(int x, int y, int z);
 } Lighting;
 
 void FancyLighting_SetActive(void);

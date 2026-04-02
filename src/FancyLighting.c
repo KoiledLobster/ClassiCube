@@ -13,6 +13,9 @@
 #include "Options.h"
 #include "Queue.h"
 
+
+static int* blockers;
+
 struct LightNode {
 	IVec3 coords; /* 12 bytes */
 	cc_uint8 brightness; /* 1 byte */
@@ -99,7 +102,14 @@ static void FreePalettes(void) {
 		Mem_Free(palettes[i]);
 	}
 }
+static void CalcAngledShadows(int xStart, int zStart, int xWidth, int zLength);
+static void AllocState_Angled(void) {
+	if (Lighting_Mode != LIGHTING_MODE_ANGLED) return;
 
+	blockers = (int*)Mem_AllocCleared((World.Width + World.Height) * (World.Length + World.Height), sizeof(int), "angled lighting heightmap");
+
+	CalcAngledShadows(0, 0, World.Width, World.Length);
+}
 static int chunksCount;
 static void AllocState(void) {
 	ClassicLighting_AllocState();
@@ -110,8 +120,197 @@ static void AllocState(void) {
 	chunkLightingData = (LightingChunk*)Mem_AllocCleared(chunksCount, sizeof(LightingChunk), "light chunks");
 	Queue_Init(&lightQueue, sizeof(struct LightNode));
 	Queue_Init(&unlightQueue, sizeof(struct LightNode));
+
+	AllocState_Angled();
 }
 
+static void CalcAngledShadows_Old(int xStart, int zStart, int xWidth, int zLength) {
+	//xStart and zStart are zero.
+
+	int width = World.Width;
+	int height = World.Height;
+	int length = World.Length;
+
+	xStart += height;
+	if (xWidth == width) { //Since xWidth starts the same as width, this always happens at first
+		xWidth += height;
+		xStart -= height;
+	}
+
+	zStart += height;
+	if (zLength == length) {
+		zLength += height;
+		zStart -= height;
+	}
+
+	//the size of the lightmap in each dimension
+	int xExtent = width + height;
+	int zExtent = length + height;
+
+	int x, z;
+	for (x = xStart; x < xStart + xWidth; ++x) {
+		for (z = zStart; z < zStart + zLength; ++z) {
+
+			int y = height - 1; //-1 because it starts at 0
+			int xD = x + height - 1;
+			int zD = z + height - 1;
+
+			{
+				int xOver = 0; //how far past the edge of the map is it?
+				int zOver = 0;
+				if (xD >= xExtent) xOver = xD - (xExtent - 1);
+				if (zD >= zExtent) zOver = zD - (zExtent - 1);
+
+				int maxOver = max(xOver, zOver);
+				//pushing y and x and z back to the edge of the map
+				y -= maxOver;
+				xD -= maxOver;
+				zD -= maxOver;
+
+				xD -= height;
+				zD -= height;
+			}
+
+
+			//y x and z safe are used to create shadow columns that are thicker than the single block that casts them
+			int ySafe, xSafe, zSafe;
+
+			ySafe = (y > 0) ? y - 1 : y;
+			xSafe = (xD > 0) ? xD - 1 : xD;
+			zSafe = (zD > 0) ? zD - 1 : zD;
+
+			while (
+				y > 0 &&
+				xD >= 0 && xD < width &&
+				zD >= 0 && zD < length &&
+				!(
+					Blocks.BlocksLight[World_GetBlock(xD, y, zD)] ||
+					Blocks.BlocksLight[World_GetBlock(xD, ySafe, zD)]
+					)
+				&&
+				!(Blocks.BlocksLight[World_GetBlock(xSafe, y, zD)] || Blocks.BlocksLight[World_GetBlock(xD, y, zSafe)]) &&
+				!(Blocks.BlocksLight[World_GetBlock(xSafe, ySafe, zD)] || Blocks.BlocksLight[World_GetBlock(xD, ySafe, zSafe)])
+				) {
+
+				--y;
+				--xD;
+				--zD;
+
+				ySafe = (y > 0) ? y - 1 : y;
+				xSafe = (xD > 0) ? xD - 1 : xD;
+				zSafe = (zD > 0) ? zD - 1 : zD;
+			}
+
+			//We searched all the way down the diagonal column and hit nothing, meaning we don't need to add any shadow blocker here, go next cell
+			if (xD < 0 || zD < 0) continue;
+
+
+			blockers[x + z * xExtent] = y;
+		}
+	}
+}
+
+static void CalcAngledShadows(int xStart, int zStart, int xWidth, int zLength) {
+    //xStart and zStart are zero.
+    
+    int width  = World.Width;
+    int height = World.Height;
+    int length = World.Length;
+
+    xStart += height;
+    if (xWidth == width) { //this always happens when calculating shadows for the entire level
+        xWidth += height;
+        xStart -= height;
+    }
+            
+    zStart += height;
+    if (zLength == length) {
+        zLength += height;
+        zStart  -= height;
+    }
+
+    //the size of the lightmap in each dimension
+    int xExtent =  width + height;
+    int zExtent = length + height;
+    
+    int x, z;
+    for (x = xStart; x < xStart + xWidth; ++x) {
+        for (z = zStart; z < zStart + zLength; ++z) {
+
+            int y  =     height -1; //-1 because it starts at 0
+            int xD = x + height -1;
+            int zD = z + height -1;
+            
+            {
+                int xOver = 0; //how far past the edge of the map is it?
+                int zOver = 0;
+                if (xD >= xExtent) xOver = xD - (xExtent - 1);
+                if (zD >= zExtent) zOver = zD - (zExtent - 1);
+
+                int maxOver = max(xOver, zOver);
+                //pushing y and x and z back to the edge of the map
+                y  -= maxOver;
+                xD -= maxOver;
+                zD -= maxOver;
+
+                xD -= height;
+                zD -= height;
+            }
+            
+
+            //y x and z safe are used to create shadow columns that are thicker than the single block that casts them
+            int ySafe, xSafe, zSafe;
+
+            ySafe = (y  > 0) ? y  - 1 : y;
+            xSafe = (xD > 0) ? xD - 1 : xD;
+            zSafe = (zD > 0) ? zD - 1 : zD;
+                    
+            while (
+
+                y > 0 &&
+                xD >= 0 && xD < width &&
+                zD >= 0 && zD < length
+				&&
+                !(
+                    Blocks.BlocksLight[World_GetBlock(xD, y    , zD)] ||
+                    Blocks.BlocksLight[World_GetBlock(xD, ySafe, zD)]
+                 )
+                &&
+                !(
+					Blocks.BlocksLight[World_GetBlock(xSafe, y    , zD)] ||
+					Blocks.BlocksLight[World_GetBlock(xD, y    , zSafe)]
+				)
+				&&
+                !(
+					Blocks.BlocksLight[World_GetBlock(xSafe, ySafe, zD)] ||
+					Blocks.BlocksLight[World_GetBlock(xD, ySafe, zSafe)]
+				)
+
+                ) {
+                        
+                --y;
+                --xD;
+                --zD;
+                        
+                ySafe = (y  > 0) ? y  - 1 : y;
+                xSafe = (xD > 0) ? xD - 1 : xD;
+                zSafe = (zD > 0) ? zD - 1 : zD;
+            }
+
+            //We searched all the way down the diagonal column and hit nothing, meaning we don't need to add any shadow blocker here, go next cell
+            if (xD < 0 || zD < 0) continue;
+
+
+            blockers[x + z * xExtent] = y;  
+        }
+    }
+}
+
+static void FreeState_Angled(void) {
+	if (Lighting_Mode != LIGHTING_MODE_ANGLED) return;
+
+	Mem_Free(blockers);
+}
 static void FreeState(void) {
 	int i;
 	ClassicLighting_FreeState();
@@ -131,6 +330,8 @@ static void FreeState(void) {
 	chunkLightingData = NULL;
 	Queue_Clear(&lightQueue);
 	Queue_Clear(&unlightQueue);
+
+	FreeState_Angled();
 }
 
 /* Converts chunk x/y/z coordinates to the corresponding index in chunks array/list */
@@ -478,11 +679,28 @@ static void Refresh(void) {
 }
 static cc_bool IsLit(int x, int y, int z) { return ClassicLighting_IsLit(x, y, z); }
 static cc_bool IsLit_Fast(int x, int y, int z) { return ClassicLighting_IsLit_Fast(x, y, z); }
+static cc_bool IsLit_Angled(int x, int y, int z) {
+	/* Test */
+    return !(
+		x >= 0 &&
+		y >= 0 &&
+		z >= 0 &&
+		x < World.Width &&
+		y < World.Height &&
+		z < World.Length
+		) ||
+		y >= blockers[(x + World.Height -y) + (z + World.Height -y) * (World.Width + World.Height)];
+}
+static cc_bool IsLit_Fast_Angled(int x, int y, int z) {
+	return IsLit_Angled(x, y, z);
+}
 
 #define CalcForChunkIfNeeded(cx, cy, cz, chunkIndex) \
 	if (chunkLightingDataFlags[chunkIndex] < CHUNK_ALL_CALCULATED) { \
 		CalculateChunkLightingAll(chunkIndex, cx, cy, cz); \
 	}
+
+
 
 static PackedCol Color_Core(int x, int y, int z, int paletteFace) {
 	cc_uint8 lightData;
@@ -505,9 +723,32 @@ static PackedCol Color_Core(int x, int y, int z, int paletteFace) {
 	}
 
 	/* This cell is exposed to sunlight */
-	if (y > ClassicLighting_GetLightHeight(x, z)) {
+	if (Lighting.IsLit_Fast(x, y, z)) {
 		/* Push the pointer forward into the sun lit palette section */
 		paletteFace += PALETTE_SHADES;
+	}
+
+	return palettes[paletteFace][lightData];
+}
+static PackedCol Color_Core_Always_Shadowed(int x, int y, int z, int paletteFace) {
+	cc_uint8 lightData;
+	int cx, cy, cz, chunkIndex;
+	int chunkCoordsIndex;
+
+	cx = x >> CHUNK_SHIFT;
+	cy = y >> CHUNK_SHIFT;
+	cz = z >> CHUNK_SHIFT;
+
+	chunkIndex = ChunkCoordsToIndex(cx, cy, cz);
+	CalcForChunkIfNeeded(cx, cy, cz, chunkIndex);
+
+	/* There might be no light data in this chunk even after it was calculated */
+	if (chunkLightingData[chunkIndex] == NULL) {
+		lightData = 0;
+	}
+	else {
+		chunkCoordsIndex = GlobalCoordsToChunkCoordsIndex(x, y, z);
+		lightData = chunkLightingData[chunkIndex][chunkCoordsIndex];
 	}
 
 	return palettes[paletteFace][lightData];
@@ -552,16 +793,20 @@ static void LightHint(int startX, int startY, int startZ) {
 void FancyLighting_SetActive(void) {
 	Lighting.OnBlockChanged = OnBlockChanged;
 	Lighting.Refresh = Refresh;
-	Lighting.IsLit = IsLit;
+	Lighting.IsLit = Lighting_Mode == LIGHTING_MODE_FANCY ? IsLit : IsLit_Angled;
 	Lighting.Color = Color;
 	Lighting.Color_XSide = Color_XSide;
 
-	Lighting.IsLit_Fast = IsLit_Fast;
-	Lighting.Color_Sprite_Fast = Color;
-	Lighting.Color_YMax_Fast   = Color;
-	Lighting.Color_YMin_Fast   = Color_YMinSide;
-	Lighting.Color_XSide_Fast  = Color_XSide;
-	Lighting.Color_ZSide_Fast  = Color_ZSide;
+	Lighting.IsLit_Fast = Lighting_Mode == LIGHTING_MODE_FANCY ? IsLit_Fast : IsLit_Fast_Angled;
+	Lighting.Color_Sprite_Fast   = Color;
+	Lighting.Color_YMax_Fast     = Color;
+	Lighting.Color_YMin_Fast     = Color_YMinSide;
+	Lighting.Color_XSide_Fast    = Color_XSide;
+	Lighting.Color_ZSide_Fast    = Color_ZSide;
+	Lighting.Color_XSideMin_Fast = Color_XSide;
+	Lighting.Color_ZSideMin_Fast = Color_ZSide;
+	//TODO X Z side min
+
 
 	Lighting.FreeState  = FreeState;
 	Lighting.AllocState = AllocState;
@@ -581,3 +826,4 @@ static void OnEnvVariableChanged(void* obj, int envVar) {
 void FancyLighting_OnInit(void) {
 	Event_Register_(&WorldEvents.EnvVarChanged, NULL, OnEnvVariableChanged);
 }
+
