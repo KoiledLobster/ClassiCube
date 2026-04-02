@@ -297,12 +297,8 @@ static void CalcAngledShadows(int xStart, int zStart, int xWidth, int zLength) {
                 zSafe = (zD > 0) ? zD - 1 : zD;
             }
 
-            /* If the diagonal ray exits through the low map edge (x < 0 or z < 0),
-               treat it like out-of-bounds lighting elsewhere: use edge-height shadow cutoff. */
-            if (xD < 0 || zD < 0) {
-                blockers[x + z * xExtent] = Env.EdgeHeight;
-                continue;
-            }
+            //We searched all the way down the diagonal column and hit nothing, meaning we don't need to add any shadow blocker here, go next cell
+            if (xD < 0 || zD < 0) continue;
 
 
             blockers[x + z * xExtent] = y;  
@@ -830,3 +826,4 @@ static void OnEnvVariableChanged(void* obj, int envVar) {
 void FancyLighting_OnInit(void) {
 	Event_Register_(&WorldEvents.EnvVarChanged, NULL, OnEnvVariableChanged);
 }
+
