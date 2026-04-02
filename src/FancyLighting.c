@@ -315,6 +315,92 @@ static void FreeState_Angled(void) {
 
 	Mem_Free(blockers);
 }
+
+/* Recalculates a single entry in the angled shadow map at shadow coordinates (sx, sz). */
+static void CalcAngledShadows_Entry(int sx, int sz) {
+	int width   = World.Width;
+	int height  = World.Height;
+	int length  = World.Length;
+	int xExtent = width  + height;
+	int zExtent = length + height;
+	int y, xD, zD, ySafe, xSafe, zSafe, xOver, zOver, maxOver;
+
+	if (sx < 0 || sx >= xExtent || sz < 0 || sz >= zExtent) return;
+
+	y  = height - 1;
+	xD = sx + height - 1;
+	zD = sz + height - 1;
+
+	xOver = (xD >= xExtent) ? xD - (xExtent - 1) : 0;
+	zOver = (zD >= zExtent) ? zD - (zExtent - 1) : 0;
+	maxOver = max(xOver, zOver);
+	y  -= maxOver; xD -= maxOver; zD -= maxOver;
+	xD -= height;  zD -= height;
+
+	if (y <= 0 || xD < 0 || zD < 0) {
+		blockers[sx + sz * xExtent] = Env.EdgeHeight;
+		return;
+	}
+
+	ySafe = (y  > 0) ? y  - 1 : y;
+	xSafe = (xD > 0) ? xD - 1 : xD;
+	zSafe = (zD > 0) ? zD - 1 : zD;
+
+	while (
+		y > 0 && xD >= 0 && xD < width && zD >= 0 && zD < length &&
+		!(Blocks.BlocksLight[World_GetBlock(xD,    y,     zD)] || Blocks.BlocksLight[World_GetBlock(xD,    ySafe, zD)]) &&
+		!(Blocks.BlocksLight[World_GetBlock(xSafe, y,     zD)] || Blocks.BlocksLight[World_GetBlock(xD,    y,     zSafe)]) &&
+		!(Blocks.BlocksLight[World_GetBlock(xSafe, ySafe, zD)] || Blocks.BlocksLight[World_GetBlock(xD,    ySafe, zSafe)])
+	) {
+		--y; --xD; --zD;
+		ySafe = (y  > 0) ? y  - 1 : y;
+		xSafe = (xD > 0) ? xD - 1 : xD;
+		zSafe = (zD > 0) ? zD - 1 : zD;
+	}
+
+	blockers[sx + sz * xExtent] = (xD < 0 || zD < 0 || y == 0) ? Env.EdgeHeight : y;
+}
+
+/* Refreshes all unique chunks along diagonal (sx, sz) from y=fromY down to y=0. */
+static void RefreshAngledDiagonal(int sx, int sz, int fromY) {
+	int width  = World.Width;
+	int height = World.Height;
+	int length = World.Length;
+	/* At step k, the diagonal visits (sx-1-k, H-1-k, sz-1-k). At y=fromY: k=H-1-fromY. */
+	int k  = height - 1 - fromY;
+	int xD = sx - 1 - k;
+	int y  = fromY;
+	int zD = sz - 1 - k;
+	int lastCX = -2, lastCY = -2, lastCZ = -2;
+	int cx, cy, cz;
+
+	while (y >= 0 && xD >= 0 && xD < width && zD >= 0 && zD < length) {
+		cx = xD >> CHUNK_SHIFT;
+		cy = y   >> CHUNK_SHIFT;
+		cz = zD  >> CHUNK_SHIFT;
+		if (cx != lastCX || cy != lastCY || cz != lastCZ) {
+			MapRenderer_RefreshChunk(cx, cy, cz);
+			lastCX = cx; lastCY = cy; lastCZ = cz;
+		}
+		--y; --xD; --zD;
+	}
+}
+
+/* Updates the angled shadow map for a single block change and refreshes affected chunks. */
+static void OnBlockChanged_Angled(int bx, int by, int bz) {
+	/* Shadow map only changes if light-blocking status changed */
+	int sx0 = bx + World.Height - by;
+	int sz0 = bz + World.Height - by;
+	int dx, dz;
+
+	for (dx = -1; dx <= 1; dx++) {
+		for (dz = -1; dz <= 1; dz++) {
+			int sx = sx0 + dx, sz = sz0 + dz;
+			CalcAngledShadows_Entry(sx, sz);
+			RefreshAngledDiagonal(sx, sz, by);
+		}
+	}
+}
 static void FreeState(void) {
 	int i;
 	ClassicLighting_FreeState();
@@ -673,6 +759,11 @@ static void OnBlockChanged(int x, int y, int z, BlockID oldBlock, BlockID newBlo
 
 	CalcBlockChange(x, y, z, oldBlock, newBlock, false);
 	CalcBlockChange(x, y, z, oldBlock, newBlock, true);
+
+	if (Lighting_Mode == LIGHTING_MODE_ANGLED &&
+		Blocks.BlocksLight[oldBlock] != Blocks.BlocksLight[newBlock]) {
+		OnBlockChanged_Angled(x, y, z);
+	}
 }
 /* Invalidates/Resets lighting state for all of the blocks in the world */
 /*  (e.g. because a block changed whether it is full bright or not) */
