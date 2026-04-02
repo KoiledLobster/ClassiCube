@@ -565,19 +565,23 @@ static void Custom_Tick(float delta) { }
 *--------------------------------------------------------Particles--------------------------------------------------------*
 *#########################################################################################################################*/
 void Particles_Render(float t) {
+	cc_bool hadFog;
 	if (!terrain_count && !rain_count && !custom_count) return;
 
 	if (Gfx.LostContext) return;
 	if (!particles_VB)
 		particles_VB = Gfx_CreateDynamicVb(VERTEX_FORMAT_TEXTURED, PARTICLES_MAX * 4);
 
+	hadFog = Gfx_GetFog();
 	Gfx_SetAlphaTest(true);
+	if (hadFog) Gfx_SetFog(false);
 
 	Gfx_SetVertexFormat(VERTEX_FORMAT_TEXTURED);
 	Terrain_Render(t);
 	Rain_Render(t);
 	Custom_Render(t);
 
+	if (hadFog) Gfx_SetFog(true);
 	Gfx_SetAlphaTest(false);
 }
 

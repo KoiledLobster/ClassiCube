@@ -18,6 +18,7 @@
 #include "Event.h"
 #include "String_.h"
 #include "Entity.h"
+#include "Particle.h"
 
 #include <stdio.h>
 
@@ -453,7 +454,8 @@ static void OrthoRender_RenderTile(struct Matrix* view, struct Matrix* proj,
 	EnvRenderer_RenderMapSides();
 	EnvRenderer_RenderMapEdges();
 
-	/* Render non-player entities */
+	/* Render particles and non-player entities */
+	Particles_Render(1.0f);
 	Entities_RenderModels(0, 1.0f);
 
 	/* Render clouds between opaque and translucent if below half map height */
