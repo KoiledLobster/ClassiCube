@@ -489,6 +489,7 @@ void OrthoRender_Execute(void) {
 	cc_filepath raw_path;
 	struct Stream stream;
 	cc_result res;
+	int yawDeg, pitchDeg;
 
 	OrthoRender_Requested = false;
 
@@ -501,6 +502,8 @@ void OrthoRender_Execute(void) {
 	e = &Entities.CurPlayer->Base;
 	usePitch = ortho_pitch >= 0.0f ? ortho_pitch : e->Pitch;
 	useYaw   = ortho_yaw   >= 0.0f ? ortho_yaw   : e->Yaw;
+	yawDeg   = (int)(useYaw   + 0.5f) % 360;
+	pitchDeg = (int)(usePitch + 0.5f) % 360;
 
 	/* Compute view extents */
 	OrthoRender_ComputeView(useYaw, usePitch,
@@ -634,7 +637,8 @@ void OrthoRender_Execute(void) {
 	DateTime_CurrentLocal(&now);
 	String_InitArray(filename, fileBuffer);
 	String_Format3(&filename, "ortho_%p4-%p2-%p2", &now.year, &now.month, &now.day);
-	String_Format3(&filename, "-%p2-%p2-%p2.png", &now.hour, &now.minute, &now.second);
+	String_Format3(&filename, "-%p2-%p2-%p2", &now.hour, &now.minute, &now.second);
+	String_Format2(&filename, "_%ideg_%ideg.png", &pitchDeg, &yawDeg);
 
 	String_InitArray(path, pathBuffer);
 	String_Format1(&path, "screenshots/%s", &filename);
@@ -690,7 +694,8 @@ void OrthoRender_Execute(void) {
 		if (smallBmp.scan0 && !rowCtx.error) {
 			String_InitArray(smallName, smallNameBuf);
 			String_Format3(&smallName, "ortho_%p4-%p2-%p2", &now.year, &now.month, &now.day);
-			String_Format3(&smallName, "-%p2-%p2-%p2_small.png", &now.hour, &now.minute, &now.second);
+			String_Format3(&smallName, "-%p2-%p2-%p2", &now.hour, &now.minute, &now.second);
+			String_Format2(&smallName, "_%ideg_%ideg_small.png", &pitchDeg, &yawDeg);
 
 			String_InitArray(smallPath, smallPathBuf);
 			String_Format1(&smallPath, "screenshots/%s", &smallName);
