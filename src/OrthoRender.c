@@ -487,7 +487,7 @@ static void OrthoRender_RenderTile(struct Matrix* view, struct Matrix* proj,
 	/* Render skybox BEFORE map, with depth test/write off so it fills background.
 	   Uses a large cube rendered with the ortho projection (not perspective)
 	   so the skybox tiles correctly across multi-tile renders. */
-	if (EnvRenderer_ShouldRenderSkybox()) {
+	if (EnvRenderer_ShouldRenderSkybox() && !ortho_gradientBG) {
 		OrthoRender_RenderSkybox();
 	}
 
@@ -506,8 +506,8 @@ static void OrthoRender_RenderTile(struct Matrix* view, struct Matrix* proj,
 	Particles_Render(1.0f);
 	Entities_RenderModels(0, 1.0f);
 
-	/* Render clouds between opaque and translucent if below half map height */
-	if (renderClouds) OrthoRender_RenderClouds();
+	/* Render clouds between opaque and translucent if below player and not gradient mode */
+	if (renderClouds && !ortho_gradientBG) OrthoRender_RenderClouds();
 
 	MapRenderer_RenderTranslucent(0);
 }
