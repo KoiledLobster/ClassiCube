@@ -25,6 +25,7 @@
 cc_bool OrthoRender_Requested;
 static float ortho_pitch = -1.0f; /* -1 means "use player viewpoint" */
 static float ortho_yaw   = -1.0f;
+static cc_bool ortho_gradientBG; /* replace border/edge with sky→fog gradient */
 
 /* Pixels per world unit (block) */
 #define ORTHO_PX_PER_BLOCK 16
@@ -424,6 +425,51 @@ static void OrthoRender_RenderSkybox(void) {
 	Gfx_SetDepthWrite(true);
 }
 
+/* 4x4 Bayer ordered dithering matrix (values 0–15) */
+static const int bayer4x4[4][4] = {
+	{  0,  8,  2, 10 },
+	{ 12,  4, 14,  6 },
+	{  3, 11,  1,  9 },
+	{ 15,  7, 13,  5 }
+};
+
+/* For each pixel in a tile that matches the sentinel clear colour, replace it with
+   a Bayer-dithered sky→fog gradient based on its vertical position in the full image. */
+static void OrthoRender_ApplyGradient(BitmapCol* pixels,
+	int tileW, int tileH, int px0, int py0, int imgH,
+	BitmapCol sentinel,
+	int skyR, int skyG, int skyB,
+	int fogR, int fogG, int fogB)
+{
+	int row, col, py, px, bv, r, g, b;
+	float t, bias;
+	BitmapCol* p;
+
+	for (row = 0; row < tileH; row++) {
+		py   = py0 + row;
+		t    = (imgH > 1) ? (float)py / (float)(imgH - 1) : 0.0f;
+		p    = pixels + row * tileW;
+
+		for (col = 0; col < tileW; col++, p++) {
+			if (*p != sentinel) continue;
+
+			px   = px0 + col;
+			bv   = bayer4x4[py & 3][px & 3];
+			bias = (bv - 7.5f) / 16.0f;   /* range ≈ -0.47 .. +0.47 */
+
+			r = (int)(skyR + t * (fogR - skyR) + bias + 0.5f);
+			g = (int)(skyG + t * (fogG - skyG) + bias + 0.5f);
+			b = (int)(skyB + t * (fogB - skyB) + bias + 0.5f);
+
+			if (r < 0) r = 0; else if (r > 255) r = 255;
+			if (g < 0) g = 0; else if (g > 255) g = 255;
+			if (b < 0) b = 0; else if (b > 255) b = 255;
+
+			*p = BitmapCol_Make(r, g, b, 255);
+		}
+	}
+}
+
 static void OrthoRender_RenderTile(struct Matrix* view, struct Matrix* proj,
 	cc_bool renderSky, cc_bool renderClouds) {
 	struct Matrix mvp;
@@ -451,8 +497,10 @@ static void OrthoRender_RenderTile(struct Matrix* view, struct Matrix* proj,
 
 	/* Render map geometry */
 	MapRenderer_RenderNormal(0);
-	EnvRenderer_RenderMapSides();
-	EnvRenderer_RenderMapEdges();
+	if (!ortho_gradientBG) {
+		EnvRenderer_RenderMapSides();
+		EnvRenderer_RenderMapEdges();
+	}
 
 	/* Render particles and non-player entities */
 	Particles_Render(1.0f);
@@ -490,6 +538,8 @@ void OrthoRender_Execute(void) {
 	struct Stream stream;
 	cc_result res;
 	int yawDeg, pitchDeg;
+	BitmapCol gradSentinel;
+	int gradSkyR, gradSkyG, gradSkyB, gradFogR, gradFogG, gradFogB;
 
 	OrthoRender_Requested = false;
 
@@ -546,7 +596,17 @@ void OrthoRender_Execute(void) {
 
 	/* Disable fog so distance doesn't affect the render */
 	Gfx_SetFog(false);
-	Gfx_ClearColor(Env.SkyCol);
+
+	if (ortho_gradientBG) {
+		/* Use a sentinel clear colour (never appears in real renders) so background
+		   pixels can be detected and replaced with the dithered gradient after readback. */
+		Gfx_ClearColor(PackedCol_Make(1, 2, 3, 255));
+		gradSentinel = BitmapCol_Make(1, 2, 3, 255);
+		gradSkyR = PackedCol_R(Env.SkyCol); gradSkyG = PackedCol_G(Env.SkyCol); gradSkyB = PackedCol_B(Env.SkyCol);
+		gradFogR = PackedCol_R(Env.FogCol); gradFogG = PackedCol_G(Env.FogCol); gradFogB = PackedCol_B(Env.FogCol);
+	} else {
+		Gfx_ClearColor(Env.SkyCol);
+	}
 
 	/* Render sky if edge height is below half the map height */
 	renderSky    = Env.EdgeHeight    < (World.Height / 2);
@@ -602,6 +662,11 @@ void OrthoRender_Execute(void) {
 				OrthoRender_CleanupTileFiles(numTilesY, numTilesX);
 				goto restore;
 			}
+
+			/* Replace sentinel background pixels with dithered gradient */
+			if (ortho_gradientBG)
+				OrthoRender_ApplyGradient(tilePixels, tileW, tileH, px0, py0, imgH,
+					gradSentinel, gradSkyR, gradSkyG, gradSkyB, gradFogR, gradFogG, gradFogB);
 
 			/* Write tile pixels to a temporary raw file */
 			res = OrthoRender_WriteTileRaw(ty, tx, tilePixels, tileW, tileH);
@@ -744,8 +809,16 @@ restore:
 *---------------------------------------------------Command handler-------------------------------------------------------*
 *#########################################################################################################################*/
 static void OrthoRenderCommand_Execute(const cc_string* args, int argsCount) {
-	float pitch = -1.0f, yaw = -1.0f; /* -1 = use player viewpoint */
+	float pitch = -1.0f, yaw = -1.0f;
+	cc_bool gradient = false;
+	int i;
 
+	/* Scan all args: "gradient" keyword may appear anywhere */
+	for (i = 0; i < argsCount; i++) {
+		if (String_CaselessEqualsConst(&args[i], "gradient")) { gradient = true; argsCount--; break; }
+	}
+
+	/* Remaining positional args: pitch [yaw] */
 	if (argsCount >= 1) {
 		if (!Convert_ParseFloat(&args[0], &pitch)) {
 			Chat_AddRaw("&eOrthoRender: &cPitch must be a number (0-90)");
@@ -768,19 +841,21 @@ static void OrthoRenderCommand_Execute(const cc_string* args, int argsCount) {
 		}
 	}
 
-	ortho_pitch = pitch;
-	ortho_yaw   = yaw;
+	ortho_pitch      = pitch;
+	ortho_yaw        = yaw;
+	ortho_gradientBG = gradient;
 	OrthoRender_Requested = true;
 }
 
 static struct ChatCommand OrthoRenderCommand = {
 	"OrthoRender", OrthoRenderCommand_Execute,
-	0, /* flags: works in both singleplayer and multiplayer */
+	0,
 	{
-		"&a/client orthorender [pitch] [yaw]",
+		"&a/client orthorender [pitch] [yaw] [gradient]",
 		"&eRenders an orthographic view of the entire map as a PNG.",
 		"&ePitch: downward angle 0-90 (default: current view).",
-		"&eYaw: rotation 0-360 (default: current view).",
+		"&eYaw: rotation 0-360 (default: current view). Add 'gradient' to replace",
+		"&e  the map border with a dithered sky-to-fog gradient background.",
 	}
 };
 
