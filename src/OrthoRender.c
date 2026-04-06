@@ -1,4 +1,5 @@
 #include "OrthoRender.h"
+#include "Builder.h"
 #include "Chat.h"
 #include "Commands.h"
 #include "Game.h"
@@ -26,8 +27,9 @@ cc_bool OrthoRender_Requested;
 static float ortho_pitch = -1.0f; /* -1 means "use player viewpoint" */
 static float ortho_yaw   = -1.0f;
 static cc_bool ortho_gradientBG; /* replace border/edge with sky→fog gradient */
+static int ortho_pxPerBlock;     /* pixels per block; 0 = use default */
 
-/* Pixels per world unit (block) */
+/* Pixels per world unit (block) — default when width:N is not specified */
 #define ORTHO_PX_PER_BLOCK 16
 
 
@@ -558,7 +560,7 @@ void OrthoRender_Execute(void) {
 		&orthoL, &orthoR, &orthoB, &orthoT, &orthoN, &orthoF, &view);
 
 	/* Compute image dimensions, scaling down if too large */
-	pxPerBlock = ORTHO_PX_PER_BLOCK;
+	pxPerBlock = ortho_pxPerBlock > 0 ? ortho_pxPerBlock : ORTHO_PX_PER_BLOCK;
 	imgW = (int)((orthoR - orthoL) * pxPerBlock + 0.5f);
 	imgH = (int)((orthoT - orthoB) * pxPerBlock + 0.5f);
 
@@ -604,7 +606,13 @@ void OrthoRender_Execute(void) {
 	renderSky    = Env.EdgeHeight   < (int)e->Position.y;
 	renderClouds = Env.CloudsHeight < (int)e->Position.y;
 
-	/* Build all chunk meshes before rendering */
+	/* Build all chunk meshes before rendering.
+	   In gradient mode, show outer faces of world-edge blocks so no gaps appear
+	   where the border geometry would normally be. */
+	if (ortho_gradientBG) {
+		Builder_ShowEdgeFaces = true;
+		MapRenderer_RefreshBorderChunks();
+	}
 	MapRenderer_BuildAllChunks();
 
 	/* Tile dimensions = window size */
@@ -778,6 +786,12 @@ void OrthoRender_Execute(void) {
 	OrthoRender_CleanupTileFiles(numTilesY, numTilesX);
 
 restore:
+	/* If edge faces were exposed for gradient mode, restore normal culling */
+	if (ortho_gradientBG && Builder_ShowEdgeFaces) {
+		Builder_ShowEdgeFaces = false;
+		MapRenderer_RefreshBorderChunks();
+	}
+
 	/* Restore all state */
 	Gfx.Projection = savedProj;
 	Gfx.View       = savedView;
@@ -803,11 +817,26 @@ restore:
 static void OrthoRenderCommand_Execute(const cc_string* args, int argsCount) {
 	float pitch = -1.0f, yaw = -1.0f;
 	cc_bool gradient = false;
+	int blockWidth = 0;
 	int i;
+	cc_string val;
 
-	/* Scan all args: "gradient" keyword may appear anywhere */
+	/* Scan all args: keyword args may appear anywhere */
 	for (i = 0; i < argsCount; i++) {
-		if (String_CaselessEqualsConst(&args[i], "gradient")) { gradient = true; argsCount--; break; }
+		if (String_CaselessEqualsConst(&args[i], "gradient")) {
+			gradient = true; argsCount--; break;
+		}
+	}
+	for (i = 0; i < argsCount; i++) {
+		static const cc_string widthPrefix = String_FromConst("width:");
+		if (String_CaselessStarts(&args[i], &widthPrefix)) {
+			val = String_UNSAFE_SubstringAt(&args[i], 6); /* skip "width:" */
+			if (!Convert_ParseInt(&val, &blockWidth) || blockWidth < 1 || blockWidth > 64) {
+				Chat_AddRaw("&eOrthoRender: &cwidth must be an integer between 1 and 64");
+				return;
+			}
+			argsCount--; break;
+		}
 	}
 
 	/* Remaining positional args: pitch [yaw] */
@@ -836,6 +865,7 @@ static void OrthoRenderCommand_Execute(const cc_string* args, int argsCount) {
 	ortho_pitch      = pitch;
 	ortho_yaw        = yaw;
 	ortho_gradientBG = gradient;
+	ortho_pxPerBlock = blockWidth;
 	OrthoRender_Requested = true;
 }
 
@@ -843,11 +873,11 @@ static struct ChatCommand OrthoRenderCommand = {
 	"OrthoRender", OrthoRenderCommand_Execute,
 	0,
 	{
-		"&a/client orthorender [pitch] [yaw] [gradient]",
+		"&a/client orthorender [pitch] [yaw] [gradient] [width:N]",
 		"&eRenders an orthographic view of the entire map as a PNG.",
 		"&ePitch: downward angle 0-90 (default: current view).",
 		"&eYaw: rotation 0-360 (default: current view). Add 'gradient' to replace",
-		"&e  the map border with a dithered sky-to-fog gradient background.",
+		"&e  the border with a sky→fog gradient. width:N = pixels/block (1-64, default 16)."
 	}
 };
 

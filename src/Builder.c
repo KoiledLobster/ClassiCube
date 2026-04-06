@@ -15,6 +15,7 @@
 #include "Options.h"
 
 int Builder_SidesLevel, Builder_EdgeLevel;
+cc_bool Builder_ShowEdgeFaces;
 /* Packs an index into the 16x16x16 count array. Coordinates range from 0 to 15. */
 #define Builder_PackCount(xx, yy, zz) ((((yy) << 8) | ((zz) << 4) | (xx)) * FACE_COUNT)
 /* Packs an index into the 18x18x18 chunk array. Coordinates range from -1 to 16. */
@@ -188,7 +189,7 @@ static void PrepareChunk(int x1, int y1, int z1) {
 				/* All of these function calls are inlined as they can be called tens of millions to hundreds of millions of times. */
 
 				if (Builder_Counts[index] == 0 ||
-					(x == 0 && (y < Builder_SidesLevel || (b >= BLOCK_WATER && b <= BLOCK_STILL_LAVA && y < Builder_EdgeLevel))) ||
+					(!Builder_ShowEdgeFaces && x == 0 && (y < Builder_SidesLevel || (b >= BLOCK_WATER && b <= BLOCK_STILL_LAVA && y < Builder_EdgeLevel))) ||
 					(x != 0 && (Blocks.Hidden[tileIdx + Builder_Chunk[cIndex - 1]] & FACE_BIT_XMIN) != 0)) {
 					Builder_Counts[index] = 0;
 				} else {
@@ -197,7 +198,7 @@ static void PrepareChunk(int x1, int y1, int z1) {
 
 				index++;
 				if (Builder_Counts[index] == 0 ||
-					(x == World.MaxX && (y < Builder_SidesLevel || (b >= BLOCK_WATER && b <= BLOCK_STILL_LAVA && y < Builder_EdgeLevel))) ||
+					(!Builder_ShowEdgeFaces && x == World.MaxX && (y < Builder_SidesLevel || (b >= BLOCK_WATER && b <= BLOCK_STILL_LAVA && y < Builder_EdgeLevel))) ||
 					(x != World.MaxX && (Blocks.Hidden[tileIdx + Builder_Chunk[cIndex + 1]] & FACE_BIT_XMAX) != 0)) {
 					Builder_Counts[index] = 0;
 				} else {
@@ -206,7 +207,7 @@ static void PrepareChunk(int x1, int y1, int z1) {
 
 				index++;
 				if (Builder_Counts[index] == 0 ||
-					(z == 0 && (y < Builder_SidesLevel || (b >= BLOCK_WATER && b <= BLOCK_STILL_LAVA && y < Builder_EdgeLevel))) ||
+					(!Builder_ShowEdgeFaces && z == 0 && (y < Builder_SidesLevel || (b >= BLOCK_WATER && b <= BLOCK_STILL_LAVA && y < Builder_EdgeLevel))) ||
 					(z != 0 && (Blocks.Hidden[tileIdx + Builder_Chunk[cIndex - EXTCHUNK_SIZE]] & FACE_BIT_ZMIN) != 0)) {
 					Builder_Counts[index] = 0;
 				} else {
@@ -215,7 +216,7 @@ static void PrepareChunk(int x1, int y1, int z1) {
 
 				index++;
 				if (Builder_Counts[index] == 0 ||
-					(z == World.MaxZ && (y < Builder_SidesLevel || (b >= BLOCK_WATER && b <= BLOCK_STILL_LAVA && y < Builder_EdgeLevel))) ||
+					(!Builder_ShowEdgeFaces && z == World.MaxZ && (y < Builder_SidesLevel || (b >= BLOCK_WATER && b <= BLOCK_STILL_LAVA && y < Builder_EdgeLevel))) ||
 					(z != World.MaxZ && (Blocks.Hidden[tileIdx + Builder_Chunk[cIndex + EXTCHUNK_SIZE]] & FACE_BIT_ZMAX) != 0)) {
 					Builder_Counts[index] = 0;
 				} else {

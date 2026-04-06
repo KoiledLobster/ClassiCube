@@ -79,6 +79,8 @@ void MapRenderer_OnBlockChanged(int x, int y, int z, BlockID block);
 void MapRenderer_Refresh(void);
 /* Forces all chunk face draw flags to true (for orthographic rendering). */
 void MapRenderer_SetAllFacesVisible(void);
+/* Marks all border chunks (x/z edge) dirty so they are rebuilt next update. */
+void MapRenderer_RefreshBorderChunks(void);
 /* Builds all dirty chunks and marks them all as visible (for orthographic rendering). */
 void MapRenderer_BuildAllChunks(void);
 
