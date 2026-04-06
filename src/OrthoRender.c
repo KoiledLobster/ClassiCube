@@ -608,9 +608,9 @@ void OrthoRender_Execute(void) {
 		Gfx_ClearColor(Env.SkyCol);
 	}
 
-	/* Render sky if edge height is below half the map height */
-	renderSky    = Env.EdgeHeight    < (World.Height / 2);
-	renderClouds = Env.CloudsHeight < (World.Height / 2);
+	/* Render sky/clouds only when they appear below the camera in ortho view */
+	renderSky    = Env.EdgeHeight   < (int)e->Position.y;
+	renderClouds = Env.CloudsHeight < (int)e->Position.y;
 
 	/* Build all chunk meshes before rendering */
 	MapRenderer_BuildAllChunks();
