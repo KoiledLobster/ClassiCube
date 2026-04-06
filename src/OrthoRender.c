@@ -29,8 +29,6 @@ static cc_bool ortho_gradientBG; /* replace border/edge with sky→fog gradient 
 
 /* Pixels per world unit (block) */
 #define ORTHO_PX_PER_BLOCK 16
-/* Maximum image dimension to avoid excessive memory use */
-#define ORTHO_MAX_DIM 16384
 
 
 /*########################################################################################################################*
@@ -563,12 +561,6 @@ void OrthoRender_Execute(void) {
 	pxPerBlock = ORTHO_PX_PER_BLOCK;
 	imgW = (int)((orthoR - orthoL) * pxPerBlock + 0.5f);
 	imgH = (int)((orthoT - orthoB) * pxPerBlock + 0.5f);
-
-	while ((imgW > ORTHO_MAX_DIM || imgH > ORTHO_MAX_DIM) && pxPerBlock > 1) {
-		pxPerBlock /= 2;
-		imgW = (int)((orthoR - orthoL) * pxPerBlock + 0.5f);
-		imgH = (int)((orthoT - orthoB) * pxPerBlock + 0.5f);
-	}
 
 	if (imgW <= 0 || imgH <= 0) {
 		Chat_AddRaw("&eOrthoRender: &cFailed to compute image dimensions");
