@@ -1,4 +1,5 @@
 #include "OrthoRender.h"
+#include "Builder.h"
 #include "Chat.h"
 #include "Commands.h"
 #include "Game.h"
@@ -605,7 +606,13 @@ void OrthoRender_Execute(void) {
 	renderSky    = Env.EdgeHeight   < (int)e->Position.y;
 	renderClouds = Env.CloudsHeight < (int)e->Position.y;
 
-	/* Build all chunk meshes before rendering */
+	/* Build all chunk meshes before rendering.
+	   In gradient mode, show outer faces of world-edge blocks so no gaps appear
+	   where the border geometry would normally be. */
+	if (ortho_gradientBG) {
+		Builder_ShowEdgeFaces = true;
+		MapRenderer_RefreshBorderChunks();
+	}
 	MapRenderer_BuildAllChunks();
 
 	/* Tile dimensions = window size */
@@ -779,6 +786,12 @@ void OrthoRender_Execute(void) {
 	OrthoRender_CleanupTileFiles(numTilesY, numTilesX);
 
 restore:
+	/* If edge faces were exposed for gradient mode, restore normal culling */
+	if (ortho_gradientBG && Builder_ShowEdgeFaces) {
+		Builder_ShowEdgeFaces = false;
+		MapRenderer_RefreshBorderChunks();
+	}
+
 	/* Restore all state */
 	Gfx.Projection = savedProj;
 	Gfx.View       = savedView;

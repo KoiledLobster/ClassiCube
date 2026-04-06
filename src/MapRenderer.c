@@ -534,6 +534,10 @@ static void RefreshBorderChunks(int maxHeight) {
 	}
 }
 
+void MapRenderer_RefreshBorderChunks(void) {
+	RefreshBorderChunks(World.Height);
+}
+
 
 /*########################################################################################################################*
 *--------------------------------------------------Chunks updating/sorting------------------------------------------------*

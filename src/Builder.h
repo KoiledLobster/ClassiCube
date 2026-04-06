@@ -18,6 +18,10 @@ extern struct IGameComponent Builder_Component;
 extern int Builder_SidesLevel, Builder_EdgeLevel;
 /* Whether smooth/advanced lighting mesh builder is used. */
 extern cc_bool Builder_SmoothLighting;
+/* When true, outer faces of blocks at the world boundary are NOT culled.
+   Set this before building chunks when the map sides geometry won't be rendered
+   (e.g. gradient background mode in ortho rendering). */
+extern cc_bool Builder_ShowEdgeFaces;
 
 /* Builds the mesh of vertices for the given chunk. */
 void Builder_MakeChunk(struct ChunkInfo* info);
