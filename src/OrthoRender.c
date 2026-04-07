@@ -1108,11 +1108,14 @@ static void OrthoRenderCommand_Execute(const cc_string* args, int argsCount) {
 	static const cc_string modeGrad    = String_FromConst("gradient");
 	static const cc_string modeNormal  = String_FromConst("normal");
 	static const cc_string widthPrefix = String_FromConst("width:");
+	const cc_string* positional[2]; /* pitch, then yaw */
 	float pitch = -1.0f, yaw = -1.0f;
 	cc_bool gradient = false;
 	int blockWidth = 0;
-	int i;
+	int i, posCount = 0;
 	cc_string val;
+
+	/* Single pass: consume keyword args, collect the rest as positional */
 	for (i = 0; i < argsCount; i++) {
 		if (String_CaselessStarts(&args[i], &modePrefix)) {
 			val = String_UNSAFE_SubstringAt(&args[i], 5); /* skip "mode:" */
@@ -1122,23 +1125,20 @@ static void OrthoRenderCommand_Execute(const cc_string* args, int argsCount) {
 				Chat_AddRaw("&eOrthoRender: &cunknown mode — use mode:normal or mode:gradient");
 				return;
 			}
-			argsCount--; break;
-		}
-	}
-	for (i = 0; i < argsCount; i++) {
-		if (String_CaselessStarts(&args[i], &widthPrefix)) {
+		} else if (String_CaselessStarts(&args[i], &widthPrefix)) {
 			val = String_UNSAFE_SubstringAt(&args[i], 6); /* skip "width:" */
 			if (!Convert_ParseInt(&val, &blockWidth) || blockWidth < 1 || blockWidth > 64) {
 				Chat_AddRaw("&eOrthoRender: &cwidth must be an integer between 1 and 64");
 				return;
 			}
-			argsCount--; break;
+		} else {
+			if (posCount < 2) positional[posCount] = &args[i];
+			posCount++;
 		}
 	}
 
-	/* Remaining positional args: pitch [yaw] */
-	if (argsCount >= 1) {
-		if (!Convert_ParseFloat(&args[0], &pitch)) {
+	if (posCount >= 1) {
+		if (!Convert_ParseFloat(positional[0], &pitch)) {
 			Chat_AddRaw("&eOrthoRender: &cPitch must be a number (0-90)");
 			return;
 		}
@@ -1148,8 +1148,8 @@ static void OrthoRenderCommand_Execute(const cc_string* args, int argsCount) {
 		}
 	}
 
-	if (argsCount >= 2) {
-		if (!Convert_ParseFloat(&args[1], &yaw)) {
+	if (posCount >= 2) {
+		if (!Convert_ParseFloat(positional[1], &yaw)) {
 			Chat_AddRaw("&eOrthoRender: &cYaw must be a number (0-360)");
 			return;
 		}
