@@ -1,6 +1,7 @@
 #include "OrthoRender.h"
 #include "Builder.h"
 #include "Chat.h"
+#include "Lighting.h"
 #include "Commands.h"
 #include "Game.h"
 #include "Graphics.h"
@@ -20,14 +21,35 @@
 #include "String_.h"
 #include "Entity.h"
 #include "Particle.h"
+#include "SelectionBox.h"
+#include "Picking.h"
+#include "Input.h"
+#include "Gui.h"
 
 #include <stdio.h>
+
+/* Convenience macro missing from Vectors.h */
+#define IVec3_Set(v, px, py, pz) do { (v).x = (px); (v).y = (py); (v).z = (pz); } while(0)
 
 cc_bool OrthoRender_Requested;
 static float ortho_pitch = -1.0f; /* -1 means "use player viewpoint" */
 static float ortho_yaw   = -1.0f;
-static cc_bool ortho_gradientBG; /* replace border/edge with sky→fog gradient */
+static cc_bool ortho_gradientBG; /* mode:gradient — replace border with sky→fog gradient */
 static int ortho_pxPerBlock;     /* pixels per block; 0 = use default */
+
+/* Region selection state — in-memory, cleared after render or map change */
+static cc_bool ortho_regionActive;   /* P1/P2 are set and should constrain the render */
+static IVec3   ortho_regionP1, ortho_regionP2;
+static cc_bool ortho_markingActive;  /* waiting for block clicks to set P1/P2 */
+static int     ortho_markStep;       /* 0 = waiting for P1, 1 = waiting for P2 */
+static float   ortho_markSavedReach; /* Picking reach before we enlarged it */
+
+/* Last confirmed region, for /client orthoregion last */
+static IVec3   ortho_lastP1, ortho_lastP2;
+static cc_bool ortho_hasLastRegion;
+
+/* Selection IDs for the region preview (high range to avoid server conflicts) */
+#define ORTHO_SEL_BOX 240
 
 /* Pixels per world unit (block) — default when width:N is not specified */
 #define ORTHO_PX_PER_BLOCK 16
@@ -65,8 +87,156 @@ static void OrthoRender_CalcOrthoMatrix(struct Matrix* matrix,
 
 
 /*########################################################################################################################*
-*---------------------------------------------------View computation------------------------------------------------------*
+*--------------------------------------------------Region selection helpers------------------------------------------------*
 *#########################################################################################################################*/
+static void OrthoRegion_ExitMarkingMode(void);
+static void OrthoRegion_OnBlockChanged(void* obj, IVec3 coords, BlockID oldBlock, BlockID block);
+static void OrthoRegion_OnPointerDown(void* obj, int idx);
+static void OrthoRegion_OnInputDown(void* obj, int key, cc_bool was, struct InputDevice* device);
+static void OrthoRegion_OnMarkPoint(IVec3 pos);
+
+static void OrthoRegion_ExitMarkingMode(void) {
+	struct LocalPlayer* lp;
+	if (!ortho_markingActive) return;
+	ortho_markingActive = false;
+
+	lp = Entities.CurPlayer;
+	lp->ReachDistance = ortho_markSavedReach;
+	Event_Unregister_(&PointerEvents.Down,      NULL, OrthoRegion_OnPointerDown);
+	Event_Unregister_(&InputEvents.Down2,        NULL, OrthoRegion_OnInputDown);
+	Event_Unregister_(&UserEvents.BlockChanged,  NULL, OrthoRegion_OnBlockChanged);
+}
+
+static void OrthoRegion_Clear(void) {
+	Selections_Remove(ORTHO_SEL_BOX);
+	ortho_regionActive = false;
+	ortho_markStep     = 0;
+	OrthoRegion_ExitMarkingMode();
+}
+
+static void OrthoRegion_UpdatePreview(void) {
+	IVec3 lo, hi;
+	lo.x = min(ortho_regionP1.x, ortho_regionP2.x);
+	lo.y = min(ortho_regionP1.y, ortho_regionP2.y);
+	lo.z = min(ortho_regionP1.z, ortho_regionP2.z);
+	hi.x = max(ortho_regionP1.x, ortho_regionP2.x) + 1;
+	hi.y = max(ortho_regionP1.y, ortho_regionP2.y) + 1;
+	hi.z = max(ortho_regionP1.z, ortho_regionP2.z) + 1;
+	Selections_Add(ORTHO_SEL_BOX, &lo, &hi, PackedCol_Make(0, 180, 255, 70));
+}
+
+/* Called by both click handlers and /client mark */
+static void OrthoRegion_OnMarkPoint(IVec3 pos) {
+	if (ortho_markStep == 0) {
+		ortho_regionP1 = pos;
+		ortho_markStep = 1;
+		Chat_AddRaw("&eOrthoRegion: &fP1 set. Left/right-click or /client mark for P2.");
+	} else {
+		ortho_regionP2 = pos;
+		OrthoRegion_ExitMarkingMode();
+		ortho_regionActive  = true;
+		ortho_lastP1        = ortho_regionP1;
+		ortho_lastP2        = ortho_regionP2;
+		ortho_hasLastRegion = true;
+		OrthoRegion_UpdatePreview();
+		Chat_AddRaw("&eOrthoRegion: &fRegion set. Run /client orthorender to render it.");
+	}
+}
+
+/* PointerEvents.Down: left-click — sets corner to the targeted block's position */
+static void OrthoRegion_OnPointerDown(void* obj, int idx) {
+	(void)obj; (void)idx;
+	if (!ortho_markingActive || !Game_SelectedPos.valid) return;
+	OrthoRegion_OnMarkPoint(Game_SelectedPos.pos);
+}
+
+/* InputEvents.Down2: right-click — sets corner to where a block would be placed */
+static void OrthoRegion_OnInputDown(void* obj, int key, cc_bool was, struct InputDevice* device) {
+	(void)obj; (void)was; (void)device;
+	if (!ortho_markingActive || key != CCMOUSE_R) return;
+	if (!Game_SelectedPos.valid || Gui_GetInputGrab()) return;
+	OrthoRegion_OnMarkPoint(Game_SelectedPos.translatedPos);
+}
+
+/* UserEvents.BlockChanged: restore any block accidentally changed during marking */
+static void OrthoRegion_OnBlockChanged(void* obj, IVec3 coords, BlockID oldBlock, BlockID block) {
+	(void)obj; (void)block;
+	if (!oldBlock) return;
+	World_SetBlock(coords.x, coords.y, coords.z, oldBlock);
+	MapRenderer_OnBlockChanged(coords.x, coords.y, coords.z, oldBlock);
+}
+
+static void OrthoRegion_EnterMarkingMode(void) {
+	struct LocalPlayer* lp = Entities.CurPlayer;
+	if (ortho_markingActive) {
+		Chat_AddRaw("&eOrthoRegion: &fAlready marking — click or /client mark for P1.");
+		return;
+	}
+
+	ortho_markingActive  = true;
+	ortho_markStep       = 0;
+	ortho_markSavedReach = lp->ReachDistance;
+	lp->ReachDistance    = 4096.0f;
+
+	Event_Register_(&PointerEvents.Down,      NULL, OrthoRegion_OnPointerDown);
+	Event_Register_(&InputEvents.Down2,        NULL, OrthoRegion_OnInputDown);
+	Event_Register_(&UserEvents.BlockChanged,  NULL, OrthoRegion_OnBlockChanged);
+	Chat_AddRaw("&eOrthoRegion: &fLeft/right-click (or /client mark) for P1.");
+}
+
+static void OrthoRegion_OnMapLoaded(void* obj) {
+	(void)obj;
+	OrthoRegion_Clear();
+}
+
+/* Exposed so OrthoRender_Execute can call it after a region render */
+static void OrthoRegion_FinishRender(void) {
+	OrthoRegion_Clear();
+}
+
+/*########################################################################################################################*
+*-------------------------------------------------Entity region culling---------------------------------------------------*
+*#########################################################################################################################*/
+static struct Entity* ortho_savedEntities[ENTITIES_MAX_COUNT];
+
+/* Null out entries in Entities.List whose position falls outside the active region.
+   Saved pointers are restored by OrthoRender_EndEntityCull after rendering. */
+static void OrthoRender_BeginEntityCull(void) {
+	IVec3 lo, hi;
+	int i;
+
+	if (!ortho_regionActive) return;
+
+	lo.x = min(ortho_regionP1.x, ortho_regionP2.x);
+	lo.y = min(ortho_regionP1.y, ortho_regionP2.y);
+	lo.z = min(ortho_regionP1.z, ortho_regionP2.z);
+	hi.x = max(ortho_regionP1.x, ortho_regionP2.x) + 1;
+	hi.y = max(ortho_regionP1.y, ortho_regionP2.y) + 1;
+	hi.z = max(ortho_regionP1.z, ortho_regionP2.z) + 1;
+
+	for (i = 0; i < ENTITIES_MAX_COUNT; i++) {
+		struct Entity* ent = Entities.List[i];
+		ortho_savedEntities[i] = ent;
+		if (!ent) continue;
+		if (ent->Position.x < (float)lo.x || ent->Position.x >= (float)hi.x ||
+			ent->Position.y < (float)lo.y || ent->Position.y >= (float)hi.y ||
+			ent->Position.z < (float)lo.z || ent->Position.z >= (float)hi.z) {
+			Entities.List[i] = NULL;
+		}
+	}
+}
+
+/* Restore Entities.List to its original state after a region render. */
+static void OrthoRender_EndEntityCull(void) {
+	int i;
+	if (!ortho_regionActive) return;
+	for (i = 0; i < ENTITIES_MAX_COUNT; i++) {
+		Entities.List[i] = ortho_savedEntities[i];
+	}
+}
+
+
+
 static void OrthoRender_ComputeView(float yawDeg, float pitchDeg,
 	float* outLeft, float* outRight, float* outBottom, float* outTop,
 	float* outNear, float* outFar, struct Matrix* outView) {
@@ -78,9 +248,33 @@ static void OrthoRender_ComputeView(float yawDeg, float pitchDeg,
 	Vec2 rot;
 	int i;
 
-	w = (float)World.Width;
-	h = (float)World.Height;
-	l = (float)World.Length;
+	if (ortho_regionActive) {
+		/* Use region corners instead of full world bounds */
+		w = (float)(max(ortho_regionP1.x, ortho_regionP2.x) + 1 - min(ortho_regionP1.x, ortho_regionP2.x));
+		h = (float)(max(ortho_regionP1.y, ortho_regionP2.y) + 1 - min(ortho_regionP1.y, ortho_regionP2.y));
+		l = (float)(max(ortho_regionP1.z, ortho_regionP2.z) + 1 - min(ortho_regionP1.z, ortho_regionP2.z));
+		mapCenter = Vec3_Create3(
+			(float)(min(ortho_regionP1.x, ortho_regionP2.x)) + w * 0.5f,
+			(float)(min(ortho_regionP1.y, ortho_regionP2.y)) + h * 0.5f,
+			(float)(min(ortho_regionP1.z, ortho_regionP2.z)) + l * 0.5f
+		);
+		{
+			float rx = mapCenter.x - w * 0.5f, ry = mapCenter.y - h * 0.5f, rz = mapCenter.z - l * 0.5f;
+			Vec3_Set(corners[0], rx,   ry,   rz  );  Vec3_Set(corners[1], rx+w, ry,   rz  );
+			Vec3_Set(corners[2], rx,   ry+h, rz  );  Vec3_Set(corners[3], rx+w, ry+h, rz  );
+			Vec3_Set(corners[4], rx,   ry,   rz+l);  Vec3_Set(corners[5], rx+w, ry,   rz+l);
+			Vec3_Set(corners[6], rx,   ry+h, rz+l);  Vec3_Set(corners[7], rx+w, ry+h, rz+l);
+		}
+	} else {
+		w = (float)World.Width;
+		h = (float)World.Height;
+		l = (float)World.Length;
+		mapCenter = Vec3_Create3(w * 0.5f, h * 0.5f, l * 0.5f);
+		Vec3_Set(corners[0], 0, 0, 0);  Vec3_Set(corners[1], w, 0, 0);
+		Vec3_Set(corners[2], 0, h, 0);  Vec3_Set(corners[3], w, h, 0);
+		Vec3_Set(corners[4], 0, 0, l);  Vec3_Set(corners[5], w, 0, l);
+		Vec3_Set(corners[6], 0, h, l);  Vec3_Set(corners[7], w, h, l);
+	}
 
 	yawRad   = yawDeg   * MATH_DEG2RAD;
 	pitchRad = pitchDeg * MATH_DEG2RAD;
@@ -90,14 +284,7 @@ static void OrthoRender_ComputeView(float yawDeg, float pitchDeg,
 	Matrix_RotateX(&rotX, pitchRad);
 	Matrix_Mul(&rotation, &rotY, &rotX);
 
-	/* 8 corners of the map bounding box */
-	Vec3_Set(corners[0], 0, 0, 0);  Vec3_Set(corners[1], w, 0, 0);
-	Vec3_Set(corners[2], 0, h, 0);  Vec3_Set(corners[3], w, h, 0);
-	Vec3_Set(corners[4], 0, 0, l);  Vec3_Set(corners[5], w, 0, l);
-	Vec3_Set(corners[6], 0, h, l);  Vec3_Set(corners[7], w, h, l);
-
-	/* Find X/Y extents in view-rotation space (centered on map) */
-	mapCenter = Vec3_Create3(w * 0.5f, h * 0.5f, l * 0.5f);
+	/* Find X/Y extents in view-rotation space (centered on region/map) */
 	minX = minY =  1e30f;
 	maxX = maxY = -1e30f;
 
@@ -497,7 +684,7 @@ static void OrthoRender_RenderTile(struct Matrix* view, struct Matrix* proj,
 
 	/* Render map geometry */
 	MapRenderer_RenderNormal(0);
-	if (!ortho_gradientBG) {
+	if (!ortho_gradientBG && !ortho_regionActive) {
 		EnvRenderer_RenderMapSides();
 		EnvRenderer_RenderMapEdges();
 	}
@@ -607,13 +794,45 @@ void OrthoRender_Execute(void) {
 	renderClouds = Env.CloudsHeight < (int)e->Position.y;
 
 	/* Build all chunk meshes before rendering.
-	   In gradient mode, show outer faces of world-edge blocks so no gaps appear
-	   where the border geometry would normally be. */
+	   In gradient mode, show outer faces of world-edge blocks so no gaps appear.
+	   In region mode, clip per-block geometry to the region bounds. */
 	if (ortho_gradientBG) {
 		Builder_ShowEdgeFaces = true;
 		MapRenderer_RefreshBorderChunks();
 	}
+	if (ortho_regionActive) {
+		IVec3 rlo, rhi;
+		rlo.x = min(ortho_regionP1.x, ortho_regionP2.x);
+		rlo.y = min(ortho_regionP1.y, ortho_regionP2.y);
+		rlo.z = min(ortho_regionP1.z, ortho_regionP2.z);
+		rhi.x = max(ortho_regionP1.x, ortho_regionP2.x) + 1; /* exclusive */
+		rhi.y = max(ortho_regionP1.y, ortho_regionP2.y) + 1;
+		rhi.z = max(ortho_regionP1.z, ortho_regionP2.z) + 1;
+		Builder_RegionMin      = rlo;
+		Builder_RegionMax      = rhi;
+		Builder_UseRegionBounds = true;
+		Lighting_RegionMin      = rlo;
+		Lighting_RegionMax      = rhi;
+		Lighting_UseRegionBounds = true;
+		/* Refresh all chunks so they rebuild with per-block clipping */
+		MapRenderer_Refresh();
+	}
 	MapRenderer_BuildAllChunks();
+
+	/* When rendering a region, also cull whole chunks outside the region AABB */
+	if (ortho_regionActive) {
+		IVec3 rlo, rhi;
+		rlo.x = min(ortho_regionP1.x, ortho_regionP2.x);
+		rlo.y = min(ortho_regionP1.y, ortho_regionP2.y);
+		rlo.z = min(ortho_regionP1.z, ortho_regionP2.z);
+		rhi.x = max(ortho_regionP1.x, ortho_regionP2.x);
+		rhi.y = max(ortho_regionP1.y, ortho_regionP2.y);
+		rhi.z = max(ortho_regionP1.z, ortho_regionP2.z);
+		MapRenderer_FilterRenderChunks(rlo, rhi);
+	}
+
+	/* Cull entities outside the active region for all tile renders */
+	OrthoRender_BeginEntityCull();
 
 	/* Tile dimensions = window size */
 	tileW     = Game.Width;
@@ -786,6 +1005,19 @@ void OrthoRender_Execute(void) {
 	OrthoRender_CleanupTileFiles(numTilesY, numTilesX);
 
 restore:
+	/* Restore entity list before any other state changes */
+	OrthoRender_EndEntityCull();
+
+	/* Clear region selection after render */
+	if (ortho_regionActive) OrthoRegion_FinishRender();
+
+	/* If region bounds clipping was active, reset it and refresh affected chunks */
+	if (Builder_UseRegionBounds) {
+		Builder_UseRegionBounds  = false;
+		Lighting_UseRegionBounds = false;
+		MapRenderer_Refresh(); /* chunks rebuild normally over next few frames */
+	}
+
 	/* If edge faces were exposed for gradient mode, restore normal culling */
 	if (ortho_gradientBG && Builder_ShowEdgeFaces) {
 		Builder_ShowEdgeFaces = false;
@@ -814,21 +1046,86 @@ restore:
 /*########################################################################################################################*
 *---------------------------------------------------Command handler-------------------------------------------------------*
 *#########################################################################################################################*/
+static void OrthoRegionCommand_Execute(const cc_string* args, int argsCount) {
+	static const cc_string subMark  = String_FromConst("mark");
+	static const cc_string subClear = String_FromConst("clear");
+	static const cc_string subLast  = String_FromConst("last");
+
+	if (argsCount == 0) {
+		OrthoRegion_EnterMarkingMode();
+	} else if (String_CaselessEquals(&args[0], &subMark)) {
+		/* /client orthoregion mark x1 y1 z1 x2 y2 z2 */
+		int x1, y1, z1, x2, y2, z2;
+		if (argsCount < 7 ||
+			!Convert_ParseInt(&args[1], &x1) || !Convert_ParseInt(&args[2], &y1) ||
+			!Convert_ParseInt(&args[3], &z1) || !Convert_ParseInt(&args[4], &x2) ||
+			!Convert_ParseInt(&args[5], &y2) || !Convert_ParseInt(&args[6], &z2)) {
+			Chat_AddRaw("&eOrthoRegion: &cUsage: mark <x1> <y1> <z1> <x2> <y2> <z2>");
+			return;
+		}
+		IVec3_Set(ortho_regionP1, x1, y1, z1);
+		IVec3_Set(ortho_regionP2, x2, y2, z2);
+		OrthoRegion_ExitMarkingMode();
+		ortho_regionActive  = true;
+		ortho_lastP1        = ortho_regionP1;
+		ortho_lastP2        = ortho_regionP2;
+		ortho_hasLastRegion = true;
+		OrthoRegion_UpdatePreview();
+		Chat_AddRaw("&eOrthoRegion: &fRegion set. Run /client orthorender to render it.");
+	} else if (String_CaselessEquals(&args[0], &subLast)) {
+		if (!ortho_hasLastRegion) {
+			Chat_AddRaw("&eOrthoRegion: &cNo previous region to restore.");
+			return;
+		}
+		OrthoRegion_Clear();
+		ortho_regionP1 = ortho_lastP1;
+		ortho_regionP2 = ortho_lastP2;
+		ortho_regionActive = true;
+		OrthoRegion_UpdatePreview();
+		Chat_AddRaw("&eOrthoRegion: &fPrevious region restored.");
+	} else if (String_CaselessEquals(&args[0], &subClear)) {
+		OrthoRegion_Clear();
+		Chat_AddRaw("&eOrthoRegion: &fRegion cleared.");
+	} else {
+		Chat_AddRaw("&eOrthoRegion: &cUsage: [mark x y z x y z | last | clear]");
+	}
+}
+
+static struct ChatCommand OrthoRegionCommand = {
+	"OrthoRegion", OrthoRegionCommand_Execute,
+	0,
+	{
+		"&a/client orthoregion [mark x y z x y z | last | clear]",
+		"&eMarks a 3D region of the world to be used by /client orthorender.",
+		"&eNo args: enter interactive mode (left-click or /client mark to set corners).",
+		"&elast: restore the previously used region.",
+		"&eclear: remove the marked region and preview."
+	}
+};
+
 static void OrthoRenderCommand_Execute(const cc_string* args, int argsCount) {
+	static const cc_string modePrefix  = String_FromConst("mode:");
+	static const cc_string modeGrad    = String_FromConst("gradient");
+	static const cc_string modeNormal  = String_FromConst("normal");
+	static const cc_string widthPrefix = String_FromConst("width:");
 	float pitch = -1.0f, yaw = -1.0f;
 	cc_bool gradient = false;
 	int blockWidth = 0;
 	int i;
 	cc_string val;
-
-	/* Scan all args: keyword args may appear anywhere */
 	for (i = 0; i < argsCount; i++) {
-		if (String_CaselessEqualsConst(&args[i], "gradient")) {
-			gradient = true; argsCount--; break;
+		if (String_CaselessStarts(&args[i], &modePrefix)) {
+			val = String_UNSAFE_SubstringAt(&args[i], 5); /* skip "mode:" */
+			if (String_CaselessEquals(&val, &modeGrad)) {
+				gradient = true;
+			} else if (!String_CaselessEquals(&val, &modeNormal)) {
+				Chat_AddRaw("&eOrthoRender: &cunknown mode — use mode:normal or mode:gradient");
+				return;
+			}
+			argsCount--; break;
 		}
 	}
 	for (i = 0; i < argsCount; i++) {
-		static const cc_string widthPrefix = String_FromConst("width:");
 		if (String_CaselessStarts(&args[i], &widthPrefix)) {
 			val = String_UNSAFE_SubstringAt(&args[i], 6); /* skip "width:" */
 			if (!Convert_ParseInt(&val, &blockWidth) || blockWidth < 1 || blockWidth > 64) {
@@ -873,11 +1170,37 @@ static struct ChatCommand OrthoRenderCommand = {
 	"OrthoRender", OrthoRenderCommand_Execute,
 	0,
 	{
-		"&a/client orthorender [pitch] [yaw] [gradient] [width:N]",
-		"&eRenders an orthographic view of the entire map as a PNG.",
+		"&a/client orthorender [pitch] [yaw] [mode:{mode}] [width:N]",
+		"&eRenders an orthographic view of the entire map (or active region) as a PNG.",
 		"&ePitch: downward angle 0-90 (default: current view).",
-		"&eYaw: rotation 0-360 (default: current view). Add 'gradient' to replace",
-		"&e  the border with a sky→fog gradient. width:N = pixels/block (1-64, default 16)."
+		"&eYaw: rotation 0-360 (default: current view).",
+		"&emode:normal (default) | mode:gradient (sky→fog bg). width:N = pixels/block (1-64)."
+	}
+};
+
+static void OrthoMarkCommand_Execute(const cc_string* args, int argsCount) {
+	struct Entity* e = &Entities.CurPlayer->Base;
+	IVec3 pos;
+	(void)args; (void)argsCount;
+
+	if (!ortho_markingActive) {
+		Chat_AddRaw("&eOrthoRegion: &cUse /client orthoregion first to start marking.");
+		return;
+	}
+	pos.x = (int)Math_Floor(e->Position.x);
+	pos.y = (int)Math_Floor(e->Position.y);
+	pos.z = (int)Math_Floor(e->Position.z);
+	OrthoRegion_OnMarkPoint(pos);
+}
+
+static struct ChatCommand OrthoMarkCommand = {
+	"Mark", OrthoMarkCommand_Execute,
+	0,
+	{
+		"&a/client mark",
+		"&eMarks the player's current position as the next ortho region corner.",
+		"&eUse after /client orthoregion to set P1 or P2 without clicking.",
+		NULL, NULL
 	}
 };
 
@@ -887,6 +1210,9 @@ static struct ChatCommand OrthoRenderCommand = {
 *#########################################################################################################################*/
 static void OrthoRender_Init(void) {
 	Commands_Register(&OrthoRenderCommand);
+	Commands_Register(&OrthoRegionCommand);
+	Commands_Register(&OrthoMarkCommand);
+	Event_Register_(&WorldEvents.MapLoaded, NULL, OrthoRegion_OnMapLoaded);
 }
 
 struct IGameComponent OrthoRender_Component = {

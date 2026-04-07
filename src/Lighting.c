@@ -15,6 +15,9 @@
 
 const char* const LightingMode_Names[LIGHTING_MODE_COUNT] = { "Classic", "Fancy", "Angled Fancy" };
 
+cc_bool  Lighting_UseRegionBounds;
+IVec3    Lighting_RegionMin, Lighting_RegionMax;
+
 cc_uint8 Lighting_Mode;
 cc_bool  Lighting_ModeLockedByServer;
 cc_bool  Lighting_ModeSetByServer;
@@ -72,13 +75,48 @@ int ClassicLighting_GetLightHeight(int x, int z) {
 	return lightH == HEIGHT_UNCALCULATED ? ClassicLighting_CalcHeightAt(x, World.Height - 1, z, hIndex) : lightH;
 }
 
+/* Returns the effective shadow height for column (x,z), capped to the active
+   region: blocks at y >= Lighting_RegionMax.y are ignored so they don't cast
+   shadows onto blocks inside the region. */
+static int ClassicLighting_RegionHeight(int x, int z) {
+	int hIndex = Lighting_Pack(x, z);
+	int h      = classic_heightmap[hIndex];
+	int scanY; BlockID block; int offset;
+
+	if (h == HEIGHT_UNCALCULATED)
+		h = ClassicLighting_CalcHeightAt(x, World.Height - 1, z, hIndex);
+
+	if (h < Lighting_RegionMax.y) return h;
+
+	/* Blocking block is above the region — scan within region for effective height */
+	for (scanY = Lighting_RegionMax.y - 1; scanY >= 0; scanY--) {
+		block = World_GetBlock(x, scanY, z);
+		if (!Blocks.BlocksLight[block]) continue;
+		offset = (Blocks.LightOffset[block] >> LIGHT_FLAG_SHADES_FROM_BELOW) & 1;
+		return scanY - offset;
+	}
+	return -10; /* column fully lit within region */
+}
+
+/* Region-aware IsLit: outside-region columns and above-region Y are always lit. */
+static cc_bool ClassicLighting_IsLitInRegion(int x, int y, int z) {
+	if (x < Lighting_RegionMin.x || x >= Lighting_RegionMax.x ||
+		z < Lighting_RegionMin.z || z >= Lighting_RegionMax.z) return true;
+	if (y >= Lighting_RegionMax.y) return true;
+	return y > ClassicLighting_RegionHeight(x, z);
+}
+
+#define LIT_REGION(x,y,z) (Lighting_UseRegionBounds \
+	? ClassicLighting_IsLitInRegion(x,y,z) \
+	: (y > classic_heightmap[Lighting_Pack(x,z)]))
+
 /* Outside color is same as sunlight color, so we reuse when possible */
 cc_bool ClassicLighting_IsLit(int x, int y, int z) {
 	return y > ClassicLighting_GetLightHeight(x, z);
 }
 
 cc_bool ClassicLighting_IsLit_Fast(int x, int y, int z) {
-	return y > classic_heightmap[Lighting_Pack(x, z)];
+	return LIT_REGION(x, y, z);
 }
 
 static PackedCol ClassicLighting_Color(int x, int y, int z) {
@@ -98,23 +136,23 @@ static PackedCol ClassicLighting_Color_XSide(int x, int y, int z) {
 }
 
 static PackedCol ClassicLighting_Color_Sprite_Fast(int x, int y, int z) {
-	return y > classic_heightmap[Lighting_Pack(x, z)] ? Env.SunCol : Env.ShadowCol;
+	return LIT_REGION(x, y, z) ? Env.SunCol : Env.ShadowCol;
 }
 
 static PackedCol ClassicLighting_Color_YMax_Fast(int x, int y, int z) {
-	return y > classic_heightmap[Lighting_Pack(x, z)] ? Env.SunCol : Env.ShadowCol;
+	return LIT_REGION(x, y, z) ? Env.SunCol : Env.ShadowCol;
 }
 
 static PackedCol ClassicLighting_Color_YMin_Fast(int x, int y, int z) {
-	return y > classic_heightmap[Lighting_Pack(x, z)] ? Env.SunYMin : Env.ShadowYMin;
+	return LIT_REGION(x, y, z) ? Env.SunYMin : Env.ShadowYMin;
 }
 
 static PackedCol ClassicLighting_Color_XSide_Fast(int x, int y, int z) {
-	return y > classic_heightmap[Lighting_Pack(x, z)] ? Env.SunXSide : Env.ShadowXSide;
+	return LIT_REGION(x, y, z) ? Env.SunXSide : Env.ShadowXSide;
 }
 
 static PackedCol ClassicLighting_Color_ZSide_Fast(int x, int y, int z) {
-	return y > classic_heightmap[Lighting_Pack(x, z)] ? Env.SunZSide : Env.ShadowZSide;
+	return LIT_REGION(x, y, z) ? Env.SunZSide : Env.ShadowZSide;
 }
 
 void ClassicLighting_Refresh(void) {

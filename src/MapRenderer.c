@@ -538,6 +538,20 @@ void MapRenderer_RefreshBorderChunks(void) {
 	RefreshBorderChunks(World.Height);
 }
 
+void MapRenderer_FilterRenderChunks(IVec3 lo, IVec3 hi) {
+	int i, out = 0;
+	struct ChunkInfo* info;
+	for (i = 0; i < renderChunksCount; i++) {
+		info = renderChunks[i];
+		/* chunk covers [centreX-8, centreX+7] etc. */
+		if (info->centreX - 8 > hi.x || info->centreX + 7 < lo.x) continue;
+		if (info->centreY - 8 > hi.y || info->centreY + 7 < lo.y) continue;
+		if (info->centreZ - 8 > hi.z || info->centreZ + 7 < lo.z) continue;
+		renderChunks[out++] = info;
+	}
+	renderChunksCount = out;
+}
+
 
 /*########################################################################################################################*
 *--------------------------------------------------Chunks updating/sorting------------------------------------------------*
