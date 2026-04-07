@@ -775,8 +775,17 @@ static void Refresh(void) {
 static cc_bool IsLit(int x, int y, int z) { return ClassicLighting_IsLit(x, y, z); }
 static cc_bool IsLit_Fast(int x, int y, int z) { return ClassicLighting_IsLit_Fast(x, y, z); }
 static cc_bool IsLit_Angled(int x, int y, int z) {
+	int yb, xb, zb;
+
 	if (!(x >= 0 && y >= 0 && z >= 0 && x < World.Width && y < World.Height && z < World.Length))
 		return 1; /* OOB = lit */
+
+	if (Lighting_UseRegionBounds) {
+		/* Positions outside the region are always lit */
+		if (x < Lighting_RegionMin.x || x >= Lighting_RegionMax.x ||
+			z < Lighting_RegionMin.z || z >= Lighting_RegionMax.z) return true;
+		if (y >= Lighting_RegionMax.y) return true;
+	}
 
 	/* The shadow map diagonal for any block at x=MaxX or z=MaxZ starts AT that
 	   block's own y, so blockers can never exceed y — IsLit would always be true.
@@ -785,7 +794,20 @@ static cc_bool IsLit_Angled(int x, int y, int z) {
 	if (x == World.MaxX || z == World.MaxZ)
 		return y >= Env.EdgeHeight;
 
-	return y >= blockers[(x + World.Height - y) + (z + World.Height - y) * (World.Width + World.Height)];
+	yb = blockers[(x + World.Height - y) + (z + World.Height - y) * (World.Width + World.Height)];
+
+	if (Lighting_UseRegionBounds) {
+		/* The blocker's world position along the diagonal at height yb is
+		   (x + yb - y,  yb,  z + yb - y).  If it lies outside the region,
+		   ignore it — out-of-region blocks must not shadow region blocks. */
+		xb = x + yb - y;
+		zb = z + yb - y;
+		if (yb >= Lighting_RegionMax.y ||
+			xb < Lighting_RegionMin.x || xb >= Lighting_RegionMax.x ||
+			zb < Lighting_RegionMin.z || zb >= Lighting_RegionMax.z) return true;
+	}
+
+	return y >= yb;
 }
 static cc_bool IsLit_Fast_Angled(int x, int y, int z) {
 	return IsLit_Angled(x, y, z);
