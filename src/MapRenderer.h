@@ -2,6 +2,7 @@
 #define CC_MAPRENDERER_H
 #include "Core.h"
 #include "Constants.h"
+#include "Vectors.h"
 CC_BEGIN_HEADER
 
 /* Renders the blocks of the world by subdividing it into chunks.
@@ -81,6 +82,8 @@ void MapRenderer_Refresh(void);
 void MapRenderer_SetAllFacesVisible(void);
 /* Marks all border chunks (x/z edge) dirty so they are rebuilt next update. */
 void MapRenderer_RefreshBorderChunks(void);
+/* Filters renderChunks in-place, keeping only those whose AABB overlaps [lo, hi]. */
+void MapRenderer_FilterRenderChunks(IVec3 lo, IVec3 hi);
 /* Builds all dirty chunks and marks them all as visible (for orthographic rendering). */
 void MapRenderer_BuildAllChunks(void);
 

@@ -1,6 +1,7 @@
 #ifndef CC_WORLDLIGHTING_H
 #define CC_WORLDLIGHTING_H
 #include "PackedCol.h"
+#include "Vectors.h"
 CC_BEGIN_HEADER
 
 /*
@@ -25,6 +26,11 @@ extern cc_bool Lighting_ModeSetByServer;
 /* The lighting mode that was set by the client before being set by the server */
 extern cc_uint8 Lighting_ModeUserCached;
 void Lighting_SetMode(cc_uint8 mode, cc_bool fromServer);
+
+/* When true, lighting treats blocks outside [RegionMin, RegionMax) as air,
+   so the ortho region is lit as if it were a standalone world. */
+extern cc_bool Lighting_UseRegionBounds;
+extern IVec3   Lighting_RegionMin, Lighting_RegionMax; /* inclusive min, exclusive max */
 
 
 /* How much ambient occlusion to apply in fancy lighting where 1.0f = none and 0.0f = maximum*/

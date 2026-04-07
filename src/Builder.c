@@ -16,6 +16,8 @@
 
 int Builder_SidesLevel, Builder_EdgeLevel;
 cc_bool Builder_ShowEdgeFaces;
+cc_bool Builder_UseRegionBounds;
+IVec3   Builder_RegionMin, Builder_RegionMax; /* world-space exclusive max */
 /* Packs an index into the 16x16x16 count array. Coordinates range from 0 to 15. */
 #define Builder_PackCount(xx, yy, zz) ((((yy) << 8) | ((zz) << 4) | (xx)) * FACE_COUNT)
 /* Packs an index into the 18x18x18 chunk array. Coordinates range from -1 to 16. */
@@ -178,6 +180,16 @@ static void PrepareChunk(int x1, int y1, int z1) {
 				b = Builder_Chunk[cIndex];
 				if (Blocks.Draw[b] == DRAW_GAS) continue;
 				index = Builder_PackCount(xx, yy, zz);
+
+				/* Region clip: skip all geometry for blocks outside the render region */
+				if (Builder_UseRegionBounds &&
+					(x < Builder_RegionMin.x || x >= Builder_RegionMax.x ||
+					 y < Builder_RegionMin.y || y >= Builder_RegionMax.y ||
+					 z < Builder_RegionMin.z || z >= Builder_RegionMax.z)) {
+					Builder_Counts[index]   = Builder_Counts[index+1] = Builder_Counts[index+2] =
+					Builder_Counts[index+3] = Builder_Counts[index+4] = Builder_Counts[index+5] = 0;
+					continue;
+				}
 
 				/* Sprites can't be stretched, nor can then be they hidden by other blocks. */
 				/* Note sprites are drawn using DrawSprite and not with any of the DrawXFace. */
@@ -403,6 +415,24 @@ void Builder_MakeChunk(struct ChunkInfo* info) {
 	info->allAir = allAir;
 	if (allAir || allSolid) return;
 	Lighting.LightHint(x1 - 1, y1 - 1, z1 - 1);
+
+	/* When rendering a bounded region, treat out-of-region neighbours as air
+	   so that blocks at region boundaries correctly expose their boundary faces. */
+	if (Builder_UseRegionBounds) {
+		int bxx, byy, bzz;
+		for (byy = -1; byy <= CHUNK_SIZE; byy++) {
+			for (bzz = -1; bzz <= CHUNK_SIZE; bzz++) {
+				for (bxx = -1; bxx <= CHUNK_SIZE; bxx++) {
+					int wx = x1 + bxx, wy = y1 + byy, wz = z1 + bzz;
+					if (wx < Builder_RegionMin.x || wx >= Builder_RegionMax.x ||
+						wy < Builder_RegionMin.y || wy >= Builder_RegionMax.y ||
+						wz < Builder_RegionMin.z || wz >= Builder_RegionMax.z) {
+						chunk[Builder_PackChunk(bxx, byy, bzz)] = BLOCK_AIR;
+					}
+				}
+			}
+		}
+	}
 
 	Mem_Set(counts, 1, CHUNK_SIZE_3 * FACE_COUNT);
 	xMax = min(World.Width,  x1 + CHUNK_SIZE);

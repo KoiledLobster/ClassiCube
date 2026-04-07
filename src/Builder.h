@@ -1,6 +1,7 @@
 #ifndef CC_BUILDER_H
 #define CC_BUILDER_H
 #include "Core.h"
+#include "Vectors.h"
 CC_BEGIN_HEADER
 
 /* 
@@ -18,10 +19,11 @@ extern struct IGameComponent Builder_Component;
 extern int Builder_SidesLevel, Builder_EdgeLevel;
 /* Whether smooth/advanced lighting mesh builder is used. */
 extern cc_bool Builder_SmoothLighting;
-/* When true, outer faces of blocks at the world boundary are NOT culled.
-   Set this before building chunks when the map sides geometry won't be rendered
-   (e.g. gradient background mode in ortho rendering). */
+/* When true, outer faces of blocks at the world boundary are NOT culled. */
 extern cc_bool Builder_ShowEdgeFaces;
+/* When true, blocks outside [RegionMin, RegionMax) produce no geometry. */
+extern cc_bool Builder_UseRegionBounds;
+extern IVec3   Builder_RegionMin, Builder_RegionMax; /* inclusive min, exclusive max */
 
 /* Builds the mesh of vertices for the given chunk. */
 void Builder_MakeChunk(struct ChunkInfo* info);

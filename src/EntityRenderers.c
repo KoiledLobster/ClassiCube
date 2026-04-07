@@ -2,6 +2,7 @@
 #include "Entity.h"
 #include "Bitmap.h"
 #include "Block.h"
+#include "Builder.h"
 #include "Event.h"
 #include "ExtMath.h"
 #include "Funcs.h"
@@ -134,6 +135,14 @@ static cc_bool EntityShadow_GetBlocks(struct Entity* e, int x, int y, int z, str
 	{
 		if (!outside) {
 			block = World_GetBlock(x, y, z);
+			/* When rendering a bounded region, treat out-of-region blocks as air
+			   so shadows don't project onto blocks outside the selection. */
+			if (Builder_UseRegionBounds &&
+				(x < Builder_RegionMin.x || x >= Builder_RegionMax.x ||
+				 y < Builder_RegionMin.y || y >= Builder_RegionMax.y ||
+				 z < Builder_RegionMin.z || z >= Builder_RegionMax.z)) {
+				block = BLOCK_AIR;
+			}
 		} else if (y == Env.EdgeHeight - 1) {
 			block = Blocks.Draw[Env.EdgeBlock] == DRAW_GAS  ? BLOCK_AIR : BLOCK_BEDROCK;
 		} else if (y == Env_SidesHeight - 1) {
