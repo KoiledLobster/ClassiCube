@@ -1174,7 +1174,7 @@ static struct ChatCommand OrthoRenderCommand = {
 		"&eRenders an orthographic view of the entire map (or active region) as a PNG.",
 		"&ePitch: downward angle 0-90 (default: current view).",
 		"&eYaw: rotation 0-360 (default: current view).",
-		"&emode:normal (default) | mode:gradient (sky→fog bg). width:N = pixels/block (1-64)."
+		"&emode:normal (default) | mode:gradient (sky to fog bg). width:N = pixels/block (1-64)."
 	}
 };
 
