@@ -1,5 +1,6 @@
 #include "Particle.h"
 #include "Block.h"
+#include "Builder.h"
 #include "World.h"
 #include "ExtMath.h"
 #include "Lighting.h"
@@ -23,6 +24,13 @@
 static GfxResourceID particles_TexId, particles_VB;
 static RNGState rnd;
 static cc_bool hitTerrain;
+
+/* When region culling is active, include only particles whose X/Z position falls
+   within the region footprint.  Particles directly above the region (y >= RegionMax.y
+   but within x/z bounds) are also kept so falling particles enter the frame naturally. */
+#define PARTICLE_IN_REGION(pos) (!Builder_UseRegionBounds || \
+	((pos).x >= (float)Builder_RegionMin.x && (pos).x < (float)Builder_RegionMax.x && \
+	 (pos).z >= (float)Builder_RegionMin.z && (pos).z < (float)Builder_RegionMax.z))
 typedef cc_bool (*CanPassThroughFunc)(BlockID b);
 
 void Particle_DoRender(const Vec2* size, const Vec3* pos, const TextureRec* rec, PackedCol col, struct VertexTextured* v) {
@@ -161,19 +169,21 @@ static void RainParticle_Render(struct Particle* p, float t, struct VertexTextur
 
 static void Rain_Render(float t) {
 	struct VertexTextured* data;
-	int i;
+	int i, drawCount = 0;
 	if (!rain_count) return;
 	
 	data = (struct VertexTextured*)Gfx_LockDynamicVb(particles_VB, 
 										VERTEX_FORMAT_TEXTURED, rain_count * 4);
 	for (i = 0; i < rain_count; i++) {
+		if (!PARTICLE_IN_REGION(rain_Particles[i].nextPos)) continue;
 		RainParticle_Render(&rain_Particles[i], t, data);
 		data += 4;
+		drawCount++;
 	}
 
 	Gfx_BindTexture(particles_TexId);
 	Gfx_UnlockDynamicVb(particles_VB);
-	Gfx_DrawVb_IndexedTris(rain_count * 4);
+	if (drawCount) Gfx_DrawVb_IndexedTris(drawCount * 4);
 }
 
 static void Rain_RemoveAt(int i) {
@@ -267,6 +277,7 @@ static void Terrain_Update1DCounts(void) {
 		terrain_1DIndices[i] = 0;
 	}
 	for (i = 0; i < terrain_count; i++) {
+		if (!PARTICLE_IN_REGION(terrain_particles[i].base.nextPos)) continue;
 		index = Atlas1D_Index(terrain_particles[i].texLoc);
 		terrain_1DCount[index] += 4;
 	}
@@ -287,6 +298,7 @@ static void Terrain_Render(float t) {
 	Terrain_Update1DCounts();
 	for (i = 0; i < terrain_count; i++) 
 	{
+		if (!PARTICLE_IN_REGION(terrain_particles[i].base.nextPos)) continue;
 		index = Atlas1D_Index(terrain_particles[i].texLoc);
 		ptr   = data + terrain_1DIndices[index];
 
@@ -473,19 +485,21 @@ static void CustomParticle_Render(struct CustomParticle* p, float t, struct Vert
 
 static void Custom_Render(float t) {
 	struct VertexTextured* data;
-	int i;
+	int i, drawCount = 0;
 	if (!custom_count) return;
 
 	data = (struct VertexTextured*)Gfx_LockDynamicVb(particles_VB, 
 										VERTEX_FORMAT_TEXTURED, custom_count * 4);
 	for (i = 0; i < custom_count; i++) {
+		if (!PARTICLE_IN_REGION(custom_particles[i].base.nextPos)) continue;
 		CustomParticle_Render(&custom_particles[i], t, data);
 		data += 4;
+		drawCount++;
 	}
 
 	Gfx_BindTexture(particles_TexId);
 	Gfx_UnlockDynamicVb(particles_VB);
-	Gfx_DrawVb_IndexedTris(custom_count * 4);
+	if (drawCount) Gfx_DrawVb_IndexedTris(drawCount * 4);
 }
 
 static void Custom_RemoveAt(int i) {
