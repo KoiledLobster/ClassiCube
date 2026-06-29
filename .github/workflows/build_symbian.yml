@@ -1,12 +1,6 @@
 name: Build latest (Symbian)
 # trigger via either push to selected branches or on manual run
 on:
-  push:
-    branches:
-      - main
-      - master
-      - ModernLighting
-      - AngledLighting
   workflow_dispatch:
 
 concurrency:
