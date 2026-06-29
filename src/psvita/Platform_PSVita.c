@@ -238,7 +238,7 @@ void Thread_Run(void** handle, Thread_StartFunc func, int stackSize, const char*
 	int threadID = sceKernelCreateThread(name, ExecThread, CC_THREAD_PRIORITY, 
 										stackSize, CC_THREAD_ATTRS, 0, NULL);
 																				
-	*handle = (int)threadID;
+	*handle = (void*)((int)threadID);
 	sceKernelStartThread(threadID, sizeof(func_), (void*)&func_);
 }
 
@@ -354,17 +354,23 @@ static cc_result ParseHost(const char* host, int port, cc_sockaddr* addrs, int* 
 	return 0;
 }
 
-cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
+cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr) {
 	struct SceNetSockaddr* raw = (struct SceNetSockaddr*)addr->data;
 
 	*s = sceNetSocket("CC socket", raw->sa_family, SCE_NET_SOCK_STREAM, SCE_NET_IPPROTO_TCP);
 	if (*s < 0) return *s;
 
-	if (nonblocking) {
-		int on = 1;
-		sceNetSetsockopt(*s, SCE_NET_SOL_SOCKET, SCE_NET_SO_NBIO, &on, sizeof(int));
-	}
 	return 0;
+}
+
+cc_result Socket_SetNonBlocking(cc_socket s, cc_bool nonblocking) {
+	int mode = nonblocking ? 1 : 0;
+	return sceNetSetsockopt(s, SCE_NET_SOL_SOCKET, SCE_NET_SO_NBIO, &mode, sizeof(int));
+}
+
+void Socket_Close(cc_socket s) {
+	sceNetShutdown(s, SCE_NET_SHUT_RDWR);
+	sceNetSocketClose(s);
 }
 
 cc_result Socket_Connect(cc_socket s, cc_sockaddr* addr) {
@@ -390,11 +396,6 @@ cc_result Socket_Write(cc_socket s, const cc_uint8* data, cc_uint32 count, cc_ui
 	return sentCount;
 }
 
-void Socket_Close(cc_socket s) {
-	sceNetShutdown(s, SCE_NET_SHUT_RDWR);
-	sceNetSocketClose(s);
-}
-
 cc_result Socket_Poll(cc_socket s, int timeoutMS, int mode, cc_bool* success) {
 	SceNetEpollEvent ev = { 0 };
 	// to match select, closed socket still counts as readable
@@ -412,15 +413,6 @@ cc_result Socket_Poll(cc_socket s, int timeoutMS, int mode, cc_bool* success) {
 	
 	*success = (ev.events & flags) != 0;
 	return 0;
-}
-
-cc_result Socket_GetLastError(cc_socket s) {
-	int error = ERR_INVALID_ARGUMENT;
-	uint32_t errSize = sizeof(error);
-
-	/* https://stackoverflow.com/questions/29479953/so-error-value-after-successful-socket-operation */
-	sceNetGetsockopt(s, SCE_NET_SOL_SOCKET, SCE_NET_SO_ERROR, &error, &errSize);
-	return error;
 }
 
 

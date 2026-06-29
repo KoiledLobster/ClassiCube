@@ -305,6 +305,9 @@ void Thread_Join(void* handle) {
 void* Mutex_Create(const char* name) {
 	sys_mutex_attr_t attr;	
 	sysMutexAttrInitialize(attr);
+
+	cc_string str = String_FromReadonly(name);
+	String_CopyToRaw(attr.name, sizeof(attr.name) - 1, &str);
 	
 	sys_mutex_t* mutex = (sys_mutex_t*)Mem_Alloc(1, sizeof(sys_mutex_t), "mutex");
 	int res = sysMutexCreate(mutex, &attr);
@@ -334,7 +337,10 @@ void Mutex_Unlock(void* handle) {
 void* Waitable_Create(const char* name) {
 	sys_sem_attr_t attr = { 0 };
 	attr.attr_protocol  = SYS_SEM_ATTR_PROTOCOL;
-	attr.attr_pshared   = SYS_SEM_ATTR_PSHARED; 
+	attr.attr_pshared   = SYS_SEM_ATTR_PSHARED;
+
+	cc_string str = String_FromReadonly(name);
+	String_CopyToRaw(attr.name, sizeof(attr.name) - 1, &str);
 	
 	sys_sem_t* sem = (sys_sem_t*)Mem_Alloc(1, sizeof(sys_sem_t), "waitable");
 	int res = sysSemCreate(sem, &attr, 0, 1000000);
@@ -427,17 +433,24 @@ static cc_result ParseHost(const char* host, int port, cc_sockaddr* addrs, int* 
 	return i == 0 ? ERR_INVALID_ARGUMENT : 0;
 }
 
-cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
+cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr) {
 	struct sockaddr* raw = (struct sockaddr*)addr->data;
 
 	*s = netSocket(raw->sa_family, SOCK_STREAM, IPPROTO_TCP);
 	if (*s < 0) return net_errno;
 
-	if (nonblocking) {
-		int on = 1;
-		netSetSockOpt(*s, SOL_SOCKET, SO_NBIO, &on, sizeof(int));
-	}
 	return 0;
+}
+
+cc_result Socket_SetNonBlocking(cc_socket s, cc_bool nonblocking) {
+	int mode = nonblocking ? 1 : 0;
+	int res  = netSetSockOpt(s, SOL_SOCKET, SO_NBIO, &mode, sizeof(int));
+	return res < 0 ? net_errno : 0;
+}
+
+void Socket_Close(cc_socket s) {
+	netShutdown(s, SHUT_RDWR);
+	netClose(s);
 }
 
 cc_result Socket_Connect(cc_socket s, cc_sockaddr* addr) {
@@ -461,11 +474,6 @@ cc_result Socket_Write(cc_socket s, const cc_uint8* data, cc_uint32 count, cc_ui
 	*modified = res; return 0;
 }
 
-void Socket_Close(cc_socket s) {
-	netShutdown(s, SHUT_RDWR);
-	netClose(s);
-}
-
 cc_result Socket_Poll(cc_socket s, int timeoutMS, int mode, cc_bool* success) {
 	struct pollfd pfd;
 	int flags;
@@ -479,15 +487,6 @@ cc_result Socket_Poll(cc_socket s, int timeoutMS, int mode, cc_bool* success) {
 	flags    = mode == SOCKET_POLL_READ ? (POLLIN | POLLHUP) : POLLOUT;
 	*success = (pfd.revents & flags) != 0;
 	return 0;
-}
-
-cc_result Socket_GetLastError(cc_socket s) {
-	int error = ERR_INVALID_ARGUMENT;
-	socklen_t errSize = sizeof(error);
-
-	/* https://stackoverflow.com/questions/29479953/so-error-value-after-successful-socket-operation */
-	netGetSockOpt(s, SOL_SOCKET, SO_ERROR, &error, &errSize);
-	return error;
 }
 
 

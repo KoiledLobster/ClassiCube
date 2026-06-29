@@ -360,17 +360,29 @@ static cc_result ParseHost(const char* host, int port, cc_sockaddr* addrs, int* 
 	return i == 0 ? ERR_INVALID_ARGUMENT : 0;
 }
 
-cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
+cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr) {
 	struct sockaddr* raw = (struct sockaddr*)addr->data;
 
 	*s = socket(raw->sa_family, SOCK_STREAM, 0); // https://www.3dbrew.org/wiki/SOCU:socket
 	if (*s == -1) return errno;
 
-	if (nonblocking) {
-		int flags = fcntl(*s, F_GETFL, 0);
-		if (flags >= 0) fcntl(*s, F_SETFL, flags | O_NONBLOCK);
-	}
 	return 0;
+}
+
+cc_result Socket_SetNonBlocking(cc_socket s, cc_bool nonblocking) {
+	int res = fcntl(s, F_GETFL, 0);
+	if (res < 0) return errno;
+
+	int flags = res & ~O_NONBLOCK;
+	if (nonblocking) flags |= O_NONBLOCK;          
+
+	res = fcntl(s, F_SETFL, flags);
+	return res < 0 ? errno : 0;
+}
+
+void Socket_Close(cc_socket s) {
+	shutdown(s, SHUT_RDWR);
+	close(s);
 }
 
 cc_result Socket_Connect(cc_socket s, cc_sockaddr* addr) {
@@ -393,11 +405,6 @@ cc_result Socket_Write(cc_socket s, const cc_uint8* data, cc_uint32 count, cc_ui
 	*modified = 0; return errno;
 }
 
-void Socket_Close(cc_socket s) {
-	shutdown(s, SHUT_RDWR);
-	close(s);
-}
-
 cc_result Socket_Poll(cc_socket s, int timeoutMS, int mode, cc_bool* success) {
 	struct pollfd pfd;
 
@@ -410,20 +417,6 @@ cc_result Socket_Poll(cc_socket s, int timeoutMS, int mode, cc_bool* success) {
 	*success  = (pfd.revents & flags) != 0;
 	
 	return 0;
-}
-
-cc_result Socket_GetLastError(cc_socket s) {
-	int error = ERR_INVALID_ARGUMENT;
-	socklen_t errSize = sizeof(error);
-
-	// Actual 3DS hardware returns INPROGRESS error code if connect is still in progress
-	// Which is different from POSIX:
-	//   https://stackoverflow.com/questions/29479953/so-error-value-after-successful-socket-operation
-	getsockopt(s, SOL_SOCKET, SO_ERROR, &error, &errSize);
-	Platform_Log1("--write poll failed-- = %i", &error);
-	if (error == -26) error = 0;
-
-	return error;
 }
 
 

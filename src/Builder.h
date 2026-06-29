@@ -26,7 +26,8 @@ extern cc_bool Builder_UseRegionBounds;
 extern IVec3   Builder_RegionMin, Builder_RegionMax; /* inclusive min, exclusive max */
 
 /* Builds the mesh of vertices for the given chunk. */
-void Builder_MakeChunk(struct ChunkInfo* info);
+/* Returns false if vertex buffer allocation fails */
+cc_bool Builder_MakeChunk(struct ChunkInfo* info);
 
 void Builder_ApplyActive(void);
 

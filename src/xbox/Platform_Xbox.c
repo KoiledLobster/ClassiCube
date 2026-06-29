@@ -393,17 +393,24 @@ static cc_result ParseHost(const char* host, int port, cc_sockaddr* addrs, int* 
 	return i == 0 ? ERR_INVALID_ARGUMENT : 0;
 }
 
-cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
+cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr) {
 	struct sockaddr* raw = (struct sockaddr*)addr->data;
 
 	*s = lwip_socket(raw->sa_family, SOCK_STREAM, 0);
 	if (*s == -1) return errno;
 
-	if (nonblocking) {
-		int blocking_raw = -1; /* non-blocking mode */
-		lwip_ioctl(*s, FIONBIO, &blocking_raw);
-	}
 	return 0;
+}
+
+cc_result Socket_SetNonBlocking(cc_socket s, cc_bool nonblocking) {
+	int mode = nonblocking ? -1 : 0;
+	int res  = lwip_ioctl(s, FIONBIO, &mode);
+	return res == -1 ? errno : 0;
+}
+
+void Socket_Close(cc_socket s) {
+	lwip_shutdown(s, SHUT_RDWR);
+	lwip_close(s);
 }
 
 cc_result Socket_Connect(cc_socket s, cc_sockaddr* addr) {
@@ -425,11 +432,6 @@ cc_result Socket_Write(cc_socket s, const cc_uint8* data, cc_uint32 count, cc_ui
 	*modified = 0; return errno;
 }
 
-void Socket_Close(cc_socket s) {
-	lwip_shutdown(s, SHUT_RDWR);
-	lwip_close(s);
-}
-
 cc_result Socket_Poll(cc_socket s, int timeoutMS, int mode, cc_bool* success) {
 	struct pollfd pfd;
 	int flags;
@@ -442,15 +444,6 @@ cc_result Socket_Poll(cc_socket s, int timeoutMS, int mode, cc_bool* success) {
 	flags    = mode == SOCKET_POLL_READ ? (POLLIN | POLLHUP) : POLLOUT;
 	*success = (pfd.revents & flags) != 0;
 	return 0;
-}
-
-cc_result Socket_GetLastError(cc_socket s) {
-	int error = ERR_INVALID_ARGUMENT;
-	socklen_t errSize = sizeof(error);
-
-	/* https://stackoverflow.com/questions/29479953/so-error-value-after-successful-socket-operation */
-	lwip_getsockopt(s, SOL_SOCKET, SO_ERROR, &error, &errSize);
-	return error;
 }
 
 

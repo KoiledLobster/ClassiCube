@@ -417,17 +417,24 @@ static CC_INLINE int Socket_LastError(void) {
 	return RPLWRAP(socketlasterr)();
 }
 
-cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
+cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr) {
 	struct sockaddr* raw = (struct sockaddr*)addr->data;
 
 	*s = RPLWRAP(socket)(raw->sa_family, SOCK_STREAM, IPPROTO_TCP);
 	if (*s < 0) return Socket_LastError();
 
-	if (nonblocking) {
-		int nonblock = 1; /* non-blocking mode */
-		RPLWRAP(setsockopt)(*s, SOL_SOCKET, SO_NONBLOCK, &nonblock, sizeof(int));
-	}
 	return 0;
+}
+
+cc_result Socket_SetNonBlocking(cc_socket s, cc_bool nonblocking) {
+	int mode = nonblocking ? 1 : 0;
+	int res  = RPLWRAP(setsockopt)(s, SOL_SOCKET, SO_NONBLOCK, &mode, sizeof(int));
+	return res < 0 ? Socket_LastError() : 0;
+}
+
+void Socket_Close(cc_socket s) {
+	RPLWRAP(shutdown)(s, SHUT_RDWR);
+	RPLWRAP(socketclose)(s);
 }
 
 cc_result Socket_Connect(cc_socket s, cc_sockaddr* addr) {
@@ -451,11 +458,6 @@ cc_result Socket_Write(cc_socket s, const cc_uint8* data, cc_uint32 count, cc_ui
 	return sentCount < 0 ? Socket_LastError() : 0;
 }
 
-void Socket_Close(cc_socket s) {
-	RPLWRAP(shutdown)(s, SHUT_RDWR);
-	RPLWRAP(socketclose)(s);
-}
-
 cc_result Socket_Poll(cc_socket s, int timeoutMS, int mode, cc_bool* success) {
 	nsysnet_fd_set rd_set, wr_set, ex_set;
 	struct nsysnet_timeval timeout = {
@@ -476,18 +478,6 @@ cc_result Socket_Poll(cc_socket s, int timeoutMS, int mode, cc_bool* success) {
 	} else {
 		*success = NSYSNET_FD_ISSET(s, set) != 0; return 0;
 	}
-}
-
-cc_result Socket_GetLastError(cc_socket s) {
-	int error = ERR_INVALID_ARGUMENT;
-	socklen_t errSize = sizeof(error);
-
-	/* https://stackoverflow.com/questions/29479953/so-error-value-after-successful-socket-operation */
-	RPLWRAP(getsockopt)(s, SOL_SOCKET, SO_ERROR, &error, &errSize);
-
-	// Apparently, actual Wii U hardware returns INPROGRESS error code if connect is still in progress
-	if (error == SOCK_ERR_INPROGRESS) error = 0;
-	return error;
 }
 
 

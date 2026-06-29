@@ -270,13 +270,21 @@ static cc_result ParseHost(const char* host, int port, cc_sockaddr* addrs, int* 
 }
 
 extern int interop_SocketCreate(void);
-extern int interop_SocketConnect(int sock, const cc_uint8* host, int port);
-
-cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
+cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr) {
 	*s = interop_SocketCreate();
 	return 0;
 }
 
+cc_result Socket_SetNonBlocking(cc_socket s, cc_bool nonblocking) {
+	return ERR_NOT_SUPPORTED;
+}
+
+extern int interop_SocketClose(int sock);
+void Socket_Close(cc_socket s) {
+	interop_SocketClose(s);
+}
+
+extern int interop_SocketConnect(int sock, const cc_uint8* host, int port);
 cc_result Socket_Connect(cc_socket s, cc_sockaddr* addr) {
 	/* size is used to store port number instead */
 	/* returned result is negative for error */
@@ -322,11 +330,6 @@ cc_result Socket_Write(cc_socket s, const cc_uint8* data, cc_uint32 count, cc_ui
 	}
 }
 
-extern int interop_SocketClose(int sock);
-void Socket_Close(cc_socket s) {
-	interop_SocketClose(s);
-}
-
 extern int interop_SocketWritable(int sock, cc_bool* writable);
 cc_result Socket_Poll(cc_socket s, int timeoutMS, int mode, cc_bool* success) {
 	// NOTE: Can't implement timeout
@@ -334,12 +337,6 @@ cc_result Socket_Poll(cc_socket s, int timeoutMS, int mode, cc_bool* success) {
 	if (timeoutMS || (mode == SOCKET_POLL_READ)) Process_Abort("poll unsupported");
 	// returned result is negative for error
 	return -interop_SocketWritable(s, success);
-}
-
-extern int interop_SocketLastError(int sock);
-cc_result Socket_GetLastError(cc_socket s) {
-	// returned result is negative for error
-	return -interop_SocketLastError(s);
 }
 
 
