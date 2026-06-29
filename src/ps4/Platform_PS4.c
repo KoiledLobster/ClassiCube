@@ -271,8 +271,15 @@ static cc_result ParseHost(const char* host, int port, cc_sockaddr* addrs, int* 
 	return 100;
 }
 
-cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
+cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr) {
 	return 100;
+}
+
+cc_result Socket_SetNonBlocking(cc_socket s, cc_bool nonblocking) {
+	return 100;
+}
+
+void Socket_Close(cc_socket s) {
 }
 
 cc_result Socket_Connect(cc_socket s, cc_sockaddr* addr) {
@@ -287,15 +294,8 @@ cc_result Socket_Write(cc_socket s, const cc_uint8* data, cc_uint32 count, cc_ui
 	return 100;
 }
 
-void Socket_Close(cc_socket s) {
-}
-
 #include <poll.h>
 cc_result Socket_Poll(cc_socket s, int timeoutMS, int mode, cc_bool* success) {
-	return 100;
-}
-
-cc_result Socket_GetLastError(cc_socket s) {
 	return 100;
 }
 

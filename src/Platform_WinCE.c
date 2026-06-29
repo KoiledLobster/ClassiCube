@@ -514,16 +514,24 @@ static cc_result ParseHost(const char* host, int port, cc_sockaddr* addrs, int* 
 	*numValidAddrs = i;
 	return i == 0 ? ERR_INVALID_ARGUMENT : 0;
 }
-cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
+
+cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr) {
 	SOCKADDR* raw_addr = (SOCKADDR*)addr->data;
 	*s = socket(raw_addr->sa_family, SOCK_STREAM, IPPROTO_TCP);
 	if (*s == INVALID_SOCKET) return WSAGetLastError();
 
-	if (nonblocking) {
-		u_long blockingMode = 1;
-		ioctlsocket(*s, FIONBIO, &blockingMode);
-	}
 	return 0;
+}
+
+cc_result Socket_SetNonBlocking(cc_socket s, cc_bool nonblocking) {
+	u_long mode = nonblocking ? 1 : 0;
+	int res     = ioctlsocket(s, FIONBIO, &mode);
+	return res == -1 ? WSAGetLastError() : 0;
+}
+
+void Socket_Close(cc_socket s) {
+	shutdown(s, SD_BOTH);
+	closesocket(s);
 }
 
 cc_result Socket_Connect(cc_socket s, cc_sockaddr* addr) {
@@ -542,11 +550,6 @@ cc_result Socket_Write(cc_socket s, const cc_uint8* data, cc_uint32 count, cc_ui
 	int sentCount = send(s, (const char*)data, count, 0);
 	if (sentCount != SOCKET_ERROR) { *modified = sentCount; return 0; }
 	*modified = 0; return WSAGetLastError();
-}
-
-void Socket_Close(cc_socket s) {
-	shutdown(s, SD_BOTH);
-	closesocket(s);
 }
 
 cc_result Socket_Poll(cc_socket s, int timeoutMS, int mode, cc_bool* success) {
@@ -581,14 +584,6 @@ cc_result Socket_Poll(cc_socket s, int timeoutMS, int mode, cc_bool* success) {
 	return WSAGetLastError();
 }
 
-cc_result Socket_GetLastError(cc_socket s) {
-	int error   = ERR_INVALID_ARGUMENT;
-	int errSize = sizeof(error);
-
-	/* https://stackoverflow.com/questions/29479953/so-error-value-after-successful-socket-operation */
-	getsockopt(s, SOL_SOCKET, SO_ERROR, (char*)&error, &errSize);
-	return error;
-}
 
 /*########################################################################################################################*
 *-----------------------------------------------------Process/Module------------------------------------------------------*
@@ -606,6 +601,7 @@ void Process_Exit(cc_result code) {
 cc_result Process_StartOpen(const cc_string* args) {
 	return ERR_NOT_SUPPORTED;
 }
+
 
 /*########################################################################################################################*
 *--------------------------------------------------------Updater----------------------------------------------------------*

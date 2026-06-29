@@ -1,18 +1,16 @@
-#include "Core.h"
-#if defined CC_BUILD_N64
 #define CC_NO_UPDATER
 #define CC_NO_DYNLIB
 #define CC_NO_SOCKETS
 #define CC_NO_THREADING
 
 #define CC_XTEA_ENCRYPTION
-#include "Stream.h"
-#include "ExtMath.h"
-#include "Funcs.h"
-#include "Window.h"
-#include "Utils.h"
-#include "Errors.h"
-#include "Options.h"
+#include "../Stream.h"
+#include "../ExtMath.h"
+#include "../Funcs.h"
+#include "../Window.h"
+#include "../Utils.h"
+#include "../Errors.h"
+#include "../Options.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -30,20 +28,17 @@ const cc_result ReturnCode_FileShareViolation = 1000000000; // not used
 const cc_result ReturnCode_FileNotFound     = ENOENT;
 const cc_result ReturnCode_PathNotFound     = 99999;
 const cc_result ReturnCode_DirectoryExists  = EEXIST;
-const cc_result ReturnCode_SocketInProgess  = EINPROGRESS;
-const cc_result ReturnCode_SocketWouldBlock = EWOULDBLOCK;
-const cc_result ReturnCode_SocketDropped    = EPIPE;
 
 const char* Platform_AppNameSuffix  = " N64";
 cc_bool Platform_ReadonlyFilesystem = false;
 cc_uint8 Platform_Flags = PLAT_FLAG_SINGLE_PROCESS | PLAT_FLAG_APP_EXIT;
-#include "_PlatformBase.h"
+#include "../_PlatformBase.h"
 
 
 /*########################################################################################################################*
 *-----------------------------------------------------Main entrypoint-----------------------------------------------------*
 *#########################################################################################################################*/
-#include "main_impl.h"
+#include "../main_impl.h"
 
 int main(int argc, char** argv) {
 	SetupProgram(argc, argv);
@@ -312,4 +307,4 @@ static cc_result GetMachineID(cc_uint32* key) {
 cc_result Platform_GetEntropy(void* data, int len) {
 	return ERR_NOT_SUPPORTED;
 }
-#endif
+

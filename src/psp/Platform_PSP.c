@@ -372,17 +372,24 @@ static cc_result ParseHost(const char* host, int port, cc_sockaddr* addrs, int* 
 	return 0;
 }
 
-cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
+cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr) {
 	struct sockaddr* raw = (struct sockaddr*)addr->data;
 
 	*s = sceNetInetSocket(raw->sa_family, SOCK_STREAM, IPPROTO_TCP);
 	if (*s < 0) return sceNetInetGetErrno();
 
-	if (nonblocking) {
-		int on = 1;
-		sceNetInetSetsockopt(*s, SOL_SOCKET, SO_NONBLOCK, &on, sizeof(int));
-	}
 	return 0;
+}
+
+cc_result Socket_SetNonBlocking(cc_socket s, cc_bool nonblocking) {
+	int mode = nonblocking ? 1 : 0;
+	int res  = sceNetInetSetsockopt(s, SOL_SOCKET, SO_NONBLOCK, &mode, sizeof(int));
+	return res < 0 ? sceNetInetGetErrno() : 0;
+}
+
+void Socket_Close(cc_socket s) {
+	sceNetInetShutdown(s, SHUT_RDWR);
+	sceNetInetClose(s);
 }
 
 cc_result Socket_Connect(cc_socket s, cc_sockaddr* addr) {
@@ -406,11 +413,6 @@ cc_result Socket_Write(cc_socket s, const cc_uint8* data, cc_uint32 count, cc_ui
 	
 	*modified = 0; 
 	return sceNetInetGetErrno();
-}
-
-void Socket_Close(cc_socket s) {
-	sceNetInetShutdown(s, SHUT_RDWR);
-	sceNetInetClose(s);
 }
 
 cc_result Socket_Poll(cc_socket s, int timeoutMS, int mode, cc_bool* success) {
@@ -439,15 +441,6 @@ cc_result Socket_Poll(cc_socket s, int timeoutMS, int mode, cc_bool* success) {
 	return 0;
 }
 
-cc_result Socket_GetLastError(cc_socket s) {
-	int error = ERR_INVALID_ARGUMENT;
-	socklen_t errSize = sizeof(error);
-
-	/* https://stackoverflow.com/questions/29479953/so-error-value-after-successful-socket-operation */
-	sceNetInetGetsockopt(s, SOL_SOCKET, SO_ERROR, &error, &errSize);
-	return error;
-}
-
 
 /*########################################################################################################################*
 *--------------------------------------------------------Platform---------------------------------------------------------*
@@ -459,7 +452,7 @@ cc_result Socket_GetLastError(cc_socket s) {
 
 static int last_net_state = -1;
 
-static void DisplayNetState(int state) {
+static void DisplayNetState(int profile, int state) {
 	union SceNetApctlInfo net_name  = { 0 };
 	union SceNetApctlInfo net_ssid  = { 0 };
 
@@ -471,8 +464,8 @@ static void DisplayNetState(int state) {
 
 	cc_string str; char buffer[256];
 	String_InitArray_NT(str, buffer);
-	String_Format2(&str, "Profile name: %c\nNetwork SSID: %c\n\n", 
-						net_name.name, net_ssid.ssid);
+	String_Format3(&str, "Network profile %i\n  Name: %c\n  SSID: %c\n\n", 
+						&profile, net_name.name, net_ssid.ssid);
 
 	switch (state)
 	{
@@ -514,6 +507,7 @@ static cc_bool InitNetworking(void) {
 		if (res == _ERROR_NETPARAM_BAD_NETCONF && profile != NET_PROFILE_LAST) continue;
 
     	if (res) { Logger_SysWarn(res, "calling sceNetApctlConnect"); return false; }
+		last_net_state = -1;
 
     	for (int try = 0; try < 200; try++) 
 		{
@@ -522,12 +516,11 @@ static cc_bool InitNetworking(void) {
         	if (res) { Logger_SimpleWarn(res, "calling sceNetApctlGetState"); return false; }
         
         	if (state == PSP_NET_APCTL_STATE_GOT_IP) return true;
-			DisplayNetState(state);
+			DisplayNetState(profile, state);
 
         	// not successful yet? try polling again in 50 ms
         	sceKernelDelayThread(50 * 1000);
     	}
-		break; // TODO auto fallback to next profile ?
 	}
 
 	Window_ShowDialog("WiFi setup failed", "Timed out establishing a WiFi connection");

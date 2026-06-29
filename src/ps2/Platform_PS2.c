@@ -575,18 +575,24 @@ static cc_result GetSocketError(cc_socket s) {
 	return res;
 }
 
-cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
+cc_result Socket_Create(cc_socket* s, cc_sockaddr* addr) {
 	struct sockaddr* raw = (struct sockaddr*)addr->data;
 
 	*s = lwip_socket(raw->sa_family, SOCK_STREAM, 0);
 	if (*s < 0) return *s;
 
-	if (nonblocking) {
-		int blocking_raw = 1;
-		int res = lwip_ioctl(*s, FIONBIO, &blocking_raw);
-		//Platform_Log2("RESSS %i: %i", s, &res);
-	}
 	return 0;
+}
+
+cc_result Socket_SetNonBlocking(cc_socket s, cc_bool nonblocking) {
+	int mode = nonblocking ? 1 : 0;
+	int res  = lwip_ioctl(s, FIONBIO, &mode);
+	return res == -1 ? GetSocketError(s) : 0;
+}
+
+void Socket_Close(cc_socket s) {
+	lwip_shutdown(s, SHUT_RDWR);
+	lwip_close(s);
 }
 
 cc_result Socket_Connect(cc_socket s, cc_sockaddr* addr) {
@@ -618,11 +624,6 @@ cc_result Socket_Write(cc_socket s, const cc_uint8* data, cc_uint32 count, cc_ui
 	*modified = 0; return ERR;
 }
 
-void Socket_Close(cc_socket s) {
-	lwip_shutdown(s, SHUT_RDWR);
-	lwip_close(s);
-}
-
 cc_result Socket_Poll(cc_socket s, int timeoutMS, int mode, cc_bool* success) {
 	fd_set read_set, write_set, error_set;
 	int selectCount;
@@ -643,15 +644,6 @@ cc_result Socket_Poll(cc_socket s, int timeoutMS, int mode, cc_bool* success) {
 	//Platform_Log4("SELECT %i = %h / %h / %h", &selectCount, &read_set, &write_set, &error_set);
 	if (selectCount == -1) { *success = false; return errno; }
 	*success = FD_ISSET(s, &write_set) != 0; return 0;
-}
-
-cc_result Socket_GetLastError(cc_socket s) {
-	// INPROGRESS error code returned if connect is still in progress
-	int error = GetSocketError(s);
-	Platform_Log1("POLL FAIL: %i", &error);
-	if (error == EINPROGRESS) error = 0;
-	
-	return error;
 }
 
 
