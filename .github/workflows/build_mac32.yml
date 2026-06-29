@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+      - shadows
   workflow_dispatch:
 
 concurrency:

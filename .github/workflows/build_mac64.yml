@@ -6,6 +6,7 @@ on:
       - main
       - master
       - AngledLighting
+      - shadows
   workflow_dispatch:
 
 

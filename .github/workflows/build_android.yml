@@ -1,10 +1,6 @@
 name: Build latest (Android2)
 # trigger via either push to selected branches or on manual run
 on:
-  push:
-    branches:
-      - main
-      - master
   workflow_dispatch:
 
 concurrency:
