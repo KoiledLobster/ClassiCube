@@ -664,7 +664,7 @@ static void OrthoRender_RenderTile(struct Matrix* view, struct Matrix* proj,
 	Gfx.View       = *view;
 	Gfx.Projection = *proj;
 	Gfx_LoadMVP(view, proj, &mvp);
-	FrustumCulling_CalcFrustumEquations(&mvp);
+	Frustum_CalcPlanes(&mvp);
 
 	/* Disable backface culling — ortho views need all faces visible */
 	Gfx_SetFaceCulling(false);
