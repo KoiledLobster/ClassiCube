@@ -1,4 +1,5 @@
 #define CC_DYNAMIC_VBS_ARE_STATIC
+#define CC_SCRATCH_VBS_ARE_DYNAMIC
 #include "../_GraphicsBase.h"
 #include "../Errors.h"
 #include "../Logger.h"
@@ -68,7 +69,7 @@ static void guInit(void) {
 	sceGuEnable(GU_CLIP_PLANES); // TODO: swap near/far instead of this?
 	sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
 
-	Gfx_OnWindowResize();
+	Gfx_OnWindowResize(Game.Width, Game.Height);
 	sceGuClutMode(GU_PSM_8888, 0, 0xFF, 0); // 32 bit CLUT entries
 	
 	sceGuFinish();
@@ -113,8 +114,7 @@ void Gfx_Create(void) {
 	Gfx.NonPowTwoTexturesSupport = GFX_NONPOW2_UPLOAD;
 	Gfx.Created      = true;
 	gfx_vsync        = true;
-	
-	Gfx_RestoreState();
+
 	last_base = -1;
 	InitGuardband();
 }
@@ -458,16 +458,19 @@ void Gfx_BindTexture(GfxResourceID texId) {
 	CCTexture* tex = (CCTexture*)texId;
 	if (!tex) tex  = white_square; 
 	
+	GE_set_texture_mode();
 	if (tex->paletted) {
 		GE_set_clut_buffer(tex->palette);
 		GE_load_clut_entries(MAX_PAL_4BPP_ENTRIES);
-		sceGuTexMode(GU_PSM_T4, 0, 0, 1);
+		GE_set_texture_format(GU_PSM_T4);
 	} else {
-		sceGuTexMode(GU_PSM_8888, 0, 0, 1);
+		GE_set_texture_format(GU_PSM_8888);
 	}
 
 	void* addr = Texture_PixelsAddr(tex);
 	sceGuTexImage(0, tex->width, tex->height, tex->width, addr);
+	// TODO when is flushing actually required? just when uploading textures?
+	GE_flush_texture_cache();
 }
 
 
@@ -500,11 +503,11 @@ static void SetColorWrite(cc_bool r, cc_bool g, cc_bool b, cc_bool a) {
 	sceGuPixelMask(mask);
 }
 
-void Gfx_SetDepthWrite(cc_bool enabled) {
+static void SetDepthWrite(cc_bool enabled) {
 	sceGuDepthMask(enabled ? 0 : 0xffffffff);
 }
 
-void Gfx_SetDepthTest(cc_bool enabled) { 
+static void SetDepthTest(cc_bool enabled) { 
 	GE_set_depth_testing(enabled); 
 }
 
@@ -605,9 +608,9 @@ void Gfx_EndFrame(void) {
 	CLIPPED = MACLIPPED = UNCLIPPED = 0;
 }
 
-void Gfx_OnWindowResize(void) {
-	Gfx_SetViewport(0, 0, Game.Width, Game.Height);
-	Gfx_SetScissor( 0, 0, Game.Width, Game.Height);
+void Gfx_OnWindowResize(int width, int height) {
+	Gfx_SetViewport(0, 0, width, height);
+	Gfx_SetScissor( 0, 0, width, height);
 }
 
 void Gfx_SetViewport(int x, int y, int w, int h) {
@@ -731,19 +734,12 @@ void Gfx_UnlockVb(GfxResourceID vb) {
 /*########################################################################################################################*
 *-----------------------------------------------------State management----------------------------------------------------*
 *#########################################################################################################################*/
-static PackedCol gfx_fogColor;
-static float gfx_fogEnd = -1.0f, gfx_fogDensity = -1.0f;
-static int gfx_fogMode  = -1;
-
 void Gfx_SetFog(cc_bool enabled) {
 	gfx_fogEnabled = enabled;
 	GE_set_fog_active(enabled);
 }
 
-void Gfx_SetFogCol(PackedCol color) {
-	if (color == gfx_fogColor) return;
-
-	gfx_fogColor = color;
+static void SetFogColor(PackedCol color) {
 	GE_set_fog_color(color);
 }
 
@@ -761,32 +757,18 @@ static void UpdateFog(void) {
 	GE_set_fog_range(depth);
 }
 
-void Gfx_SetFogDensity(float value) {
-	if (value == gfx_fogDensity) return;
-	gfx_fogDensity = value;
-	UpdateFog();
-}
+static void SetFogDensity(float value) { UpdateFog(); }
 
-void Gfx_SetFogEnd(float value) {
-	if (value == gfx_fogEnd) return;
-	gfx_fogEnd = value;
-	UpdateFog();
-}
+static void SetFogEnd(float value)     { UpdateFog(); }
 
-void Gfx_SetFogMode(FogFunc func) {
-	if (func == gfx_fogMode) return;
-	gfx_fogMode = func;
-	UpdateFog();
-}
+static void SetFogMode(FogFunc func)   { UpdateFog(); }
 
 static void SetAlphaTest(cc_bool enabled) { 
 	GE_set_alpha_testing(enabled);
 }
 
 void Gfx_DepthOnlyRendering(cc_bool depthOnly) {
-	cc_bool enabled = !depthOnly;
-	SetColorWrite(enabled & gfx_colorMask[0], enabled & gfx_colorMask[1], 
-				  enabled & gfx_colorMask[2], enabled & gfx_colorMask[3]);
+    DefaultDepthOnlyRendering(depthOnly);
 }
 
 

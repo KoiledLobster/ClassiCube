@@ -1,4 +1,5 @@
 #define CC_DYNAMIC_VBS_ARE_STATIC
+#define CC_SCRATCH_VBS_ARE_DYNAMIC
 #include "../_GraphicsBase.h"
 #include "../Errors.h"
 #include "../Logger.h"
@@ -46,10 +47,8 @@ void Gfx_Create(void) {
 	Gfx.MaxLowResTexSize = 2048;
 
 	Gfx.NonPowTwoTexturesSupport = GFX_NONPOW2_FULL;
-	Gfx_RestoreState();
 
 	Gfx_SetFaceCulling(false);
-	Gfx_SetViewport(0, 0, Game.Width, Game.Height);
 }
 
 cc_bool Gfx_TryRestoreContext(void) {
@@ -82,7 +81,9 @@ void Gfx_SetVSync(cc_bool vsync) {
 	gfx_vsync = vsync; // TODO update vsync
 }
 
-void Gfx_OnWindowResize(void) { }
+void Gfx_OnWindowResize(int width, int height) {
+	Gfx_SetViewport(0, 0, width, height);
+}
 
 void Gfx_SetViewport(int x, int y, int w, int h) {
 	gpuViewport(x, y, w, h);
@@ -355,7 +356,7 @@ static void SetColorWrite(cc_bool r, cc_bool g, cc_bool b, cc_bool a) {
 }
 
 #define FLAG_Z_WRITE 0x02
-void Gfx_SetDepthWrite(cc_bool enabled) { 
+static void SetDepthWrite(cc_bool enabled) { 
 	__rdpq_mode_change_som(SOM_Z_WRITE, enabled ? SOM_Z_WRITE : 0);
 
 	gpu_attr_z &= ~FLAG_Z_WRITE;
@@ -364,7 +365,7 @@ void Gfx_SetDepthWrite(cc_bool enabled) {
 }
 
 #define FLAG_Z_READ 0x01
-void Gfx_SetDepthTest(cc_bool enabled) { 
+static void SetDepthTest(cc_bool enabled) { 
 	__rdpq_mode_change_som(SOM_Z_COMPARE, enabled ? SOM_Z_COMPARE : 0);
 
 	gpu_attr_z &= ~FLAG_Z_READ;
@@ -539,27 +540,17 @@ void Gfx_UnlockVb(GfxResourceID vb) {
 *#########################################################################################################################*/
 static cc_bool depthOnlyRendering;
 
-void Gfx_SetFog(cc_bool enabled) {
-}
-
-void Gfx_SetFogCol(PackedCol color) {
-}
-
-void Gfx_SetFogDensity(float value) {
-}
-
-void Gfx_SetFogEnd(float value) {
-}
-
-void Gfx_SetFogMode(FogFunc func) {
-}
+void Gfx_SetFog(cc_bool enabled)         { } // TODO: implement
+static void SetFogColor(PackedCol color) { } // TODO: implement
+static void SetFogDensity(float value)   { } // TODO: implement
+static void SetFogEnd(float value)       { } // TODO: implement
+static void SetFogMode(FogFunc func)     { } // TODO: implement
 
 void Gfx_DepthOnlyRendering(cc_bool depthOnly) {
 	depthOnlyRendering = depthOnly; // TODO: Better approach? maybe using glBlendFunc instead?
 	cc_bool enabled    = !depthOnly;
 
-	//SetColorWrite(enabled & gfx_colorMask[0], enabled & gfx_colorMask[1], 
-	//			  enabled & gfx_colorMask[2], enabled & gfx_colorMask[3]);
+	//DefaultDepthOnlyRendering(depthOnly);
 	gpu_attr_tex = enabled;
 	gpuUpdateFormat();
 }
