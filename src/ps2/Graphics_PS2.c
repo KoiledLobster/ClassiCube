@@ -1,4 +1,5 @@
 #define CC_DYNAMIC_VBS_ARE_STATIC
+#define CC_SCRATCH_VBS_ARE_DYNAMIC
 #include "../_GraphicsBase.h"
 #include "../Errors.h"
 #include "../Window.h"
@@ -260,7 +261,7 @@ void Gfx_Create(void) {
 	formatDirty = true;
 	InitDrawingEnv();
 	InitGuardband();
-	Gfx_OnWindowResize();
+	Gfx_OnWindowResize(Game.Width, Game.Height);
 	
 // TODO maybe Min not actually needed?
 	Gfx.MinTexWidth  = 4;
@@ -272,7 +273,6 @@ void Gfx_Create(void) {
 	Gfx.Created      = true;
 	
 	Gfx.NonPowTwoTexturesSupport = GFX_NONPOW2_UPLOAD;
-	Gfx_RestoreState();
 }
 
 void Gfx_Free(void) { 
@@ -724,13 +724,12 @@ void Gfx_DisableMipmaps(void) { }
 *------------------------------------------------------State management---------------------------------------------------*
 *#########################################################################################################################*/
 static int clearR, clearG, clearB;
-static cc_bool gfx_depthTest;
 
-void Gfx_SetFog(cc_bool enabled)    { }
-void Gfx_SetFogCol(PackedCol col)   { } // TODO PACK_GIFTAG(q, GS_SET_FOGCOL(0,0,0), GS_REG_FOGCOL);
-void Gfx_SetFogDensity(float value) { }
-void Gfx_SetFogEnd(float value)     { }
-void Gfx_SetFogMode(FogFunc func)   { }
+void Gfx_SetFog(cc_bool enabled)         { }
+static void SetFogColor(PackedCol color) { } // TODO PACK_GIFTAG(q, GS_SET_FOGCOL(0,0,0), GS_REG_FOGCOL);
+static void SetFogDensity(float value)   { }
+static void SetFogEnd(float value)       { }
+static void SetFogMode(FogFunc func)     { }
 
 static qword_t* UpdateState(qword_t* q) {
 	// TODO: toggle Enable instead of method ?
@@ -835,12 +834,11 @@ void Gfx_ClearColor(PackedCol color) {
 	clearB = PackedCol_B(color);
 }
 
-void Gfx_SetDepthTest(cc_bool enabled) {
-	gfx_depthTest = enabled;
-	stateDirty    = true;
+static void SetDepthTest(cc_bool enabled) {
+	stateDirty = true;
 }
 
-void Gfx_SetDepthWrite(cc_bool enabled) {
+static void SetDepthWrite(cc_bool enabled) {
 	unsigned mask = !enabled;
 	Q = GS_SetDepthBuffer(Q, &fb_depth, mask);
 }
@@ -856,9 +854,7 @@ static void SetColorWrite(cc_bool r, cc_bool g, cc_bool b, cc_bool a) {
 }
 
 void Gfx_DepthOnlyRendering(cc_bool depthOnly) {
-	cc_bool enabled = !depthOnly;
-	SetColorWrite(enabled & gfx_colorMask[0], enabled & gfx_colorMask[1], 
-				  enabled & gfx_colorMask[2], enabled & gfx_colorMask[3]);
+    DefaultDepthOnlyRendering(depthOnly);
 }
 
 
@@ -1170,9 +1166,9 @@ void Gfx_SetVSync(cc_bool vsync) {
 	gfx_vsync = vsync;
 }
 
-void Gfx_OnWindowResize(void) {
-	Gfx_SetViewport(0, 0, Game.Width, Game.Height);
-	Gfx_SetScissor( 0, 0, Game.Width, Game.Height);
+void Gfx_OnWindowResize(int width, int height) {
+	Gfx_SetViewport(0, 0, width, height);
+	Gfx_SetScissor( 0, 0, width, height);
 }
 
 void Gfx_SetViewport(int x, int y, int w, int h) {

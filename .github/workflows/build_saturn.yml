@@ -21,13 +21,15 @@ jobs:
           apt-get install -y curl
 
       - name: Compile Saturn build
+        shell: bash
         run: |
-          make saturn
+          LATEST_FLAG=-DCC_COMMIT_SHA=\\\"${GITHUB_SHA::9}\\\"
+          make saturn EXTRA_CFLAGS="$LATEST_FLAG"
           
           
       - uses: ./.github/actions/upload_build
         with:
-          SOURCE_FILE: 'build/saturn/ClassiCube-saturn.elf'
+          SOURCE_FILE: 'ClassiCube-saturn.elf'
           DEST_NAME: 'ClassiCube-saturn.elf'
           
       - uses: ./.github/actions/upload_build
@@ -37,7 +39,7 @@ jobs:
           
       - uses: ./.github/actions/upload_build
         with:
-          SOURCE_FILE: 'ClassiCube-saturn.bin'
+          SOURCE_FILE: 'build/saturn/ClassiCube-saturn.bin'
           DEST_NAME: 'ClassiCube-saturn.bin'
           
       - uses: ./.github/actions/upload_build

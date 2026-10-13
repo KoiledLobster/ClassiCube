@@ -714,6 +714,7 @@ void OrthoRender_Execute(void) {
 	int numTilesX, numTilesY, tx, ty;
 	int px0, py0;
 	int savedViewDist, savedMaxViewDist;
+	int savedWindowW, savedWindowH;
 	int pxPerBlock, neededDist;
 	cc_bool savedFog, renderSky, renderClouds;
 
@@ -767,6 +768,8 @@ void OrthoRender_Execute(void) {
 	savedViewDist   = Game_ViewDistance;
 	savedMaxViewDist = Game_MaxViewDistance;
 	savedFog        = Gfx_GetFog();
+	savedWindowW = Game.Width;
+	savedWindowH = Game.Height;
 
 	/* Increase view distance to cover entire map */
 	neededDist = World.Width + World.Height + World.Length;
@@ -1035,7 +1038,7 @@ restore:
 	Gfx_SetFaceCulling(false); /* MapRenderer re-enables as needed */
 	if (savedFog) Gfx_SetFog(true);
 	EnvRenderer_UpdateFog(); /* Restore fog color/density from environment */
-	Gfx_OnWindowResize(); /* Restores viewport and handles Retina/HiDPI scaling */
+	Gfx_OnWindowResize(savedWindowW, savedWindowH); /* Restores viewport and handles Retina/HiDPI scaling */
 	Gfx_SetScissor(0, 0, Game.Width, Game.Height);
 	Gfx_LoadMatrix(MATRIX_PROJ, &savedProj);
 	Gfx_LoadMatrix(MATRIX_VIEW, &savedView);

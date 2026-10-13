@@ -249,13 +249,13 @@ cc_bool Game_UpdateTexture(GfxResourceID* texId, struct Stream* src, const cc_st
 	cc_result res;
 	
 	res = Png_Decode(&bmp, src);
-	if (res) { Logger_SysWarn2(res, "decoding", file); }
+	if (res) { Logger_SysWarn2(res, "decoding", file); return false; }
 	
 	/* E.g. gui.png only need top half of the texture loaded */
 	if (heightDivisor && bmp.height >= *heightDivisor)
 		bmp.height /= *heightDivisor;
 
-	success = !res && Game_ValidateBitmap(file, &bmp);
+	success = Game_ValidateBitmap(file, &bmp);
 	if (success) {
 		if (skinType) { *skinType = Utils_CalcSkinType(&bmp); }
 		Gfx_RecreateTexture(texId, &bmp, TEXTURE_FLAG_MANAGED, false);
@@ -313,7 +313,7 @@ void Game_UpdateDimensions(void) {
 
 static void Game_OnResize(void* obj) {
 	Game_UpdateDimensions();
-	Gfx_OnWindowResize();
+	Gfx_OnWindowResize(Game.Width, Game.Height);
 	Camera_UpdateProjection();
 }
 
@@ -405,12 +405,12 @@ static void Game_Load(void) {
 	Event_Register_(&WindowEvents.Closing,         NULL, Game_PendingClose);
 	Event_Register_(&WindowEvents.InactiveChanged, NULL, HandleInactiveChanged);
 
+	Game_AddComponent(&Gfx_Component);
 	Game_AddComponent(&World_Component);
 	Game_AddComponent(&Textures_Component);
 	Game_AddComponent(&Input_Component);
 	Game_AddComponent(&InputHandler_Component);
 	Game_AddComponent(&Camera_Component);
-	Game_AddComponent(&Gfx_Component);
 	Game_AddComponent(&Blocks_Component);
 	Game_AddComponent(&Drawer2D_Component);
 	Game_AddComponent(&SystemFonts_Component);
@@ -499,6 +499,9 @@ static void Render3DFrame(float delta, float t) {
 	Frustum_CalcPlanes(&Gfx.Projection, &Gfx.View);*/
 	Gfx_LoadMVP(&Gfx.View, &Gfx.Projection, &mvp);
 	Frustum_CalcPlanes(&mvp);
+
+	Gfx_SetDepthTest(true);
+	Gfx_SetDepthWrite(true);
 
 	if (EnvRenderer_ShouldRenderSkybox()) EnvRenderer_RenderSkybox();
 	AxisLinesRenderer_Render();
@@ -659,6 +662,7 @@ static void LimitFPS(void) {
 
 static CC_INLINE void Game_DrawFrame(float delta, float t) {
 	int i;
+	/* int MS = delta * 1000; Platform_Log1("ELAPSED: %i ms", &MS); */
 
 	if (!Gui_GetBlocksWorld()) {
 		Camera.Active->GetPickedBlock(&Game_SelectedPos); /* TODO: only pick when necessary */

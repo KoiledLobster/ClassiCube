@@ -1,5 +1,6 @@
 #define OVERRIDE_BEGEND2D_FUNCTIONS
 #define CC_DYNAMIC_VBS_ARE_STATIC
+#define CC_SCRATCH_VBS_ARE_SHARED_DYNAMIC
 #include "../_GraphicsBase.h"
 #include "../Errors.h"
 #include "../Window.h"
@@ -179,7 +180,6 @@ void Gfx_Create(void) {
 	Gfx.Created      = true;
 	Gfx.Limitations  = GFX_LIMIT_MAX_VERTEX_SIZE;
 	
-	Gfx_RestoreState();
 	SetupContexts(Window_Main.Width, Window_Main.Height);
 	Gfx_ClearColor(PackedCol_Make(63, 0, 127, 255));
 
@@ -562,11 +562,11 @@ void Gfx_DisableMipmaps(void) { }
 /*########################################################################################################################*
 *------------------------------------------------------State management---------------------------------------------------*
 *#########################################################################################################################*/
-void Gfx_SetFog(cc_bool enabled)    { }
-void Gfx_SetFogCol(PackedCol col)   { }
-void Gfx_SetFogDensity(float value) { }
-void Gfx_SetFogEnd(float value)     { }
-void Gfx_SetFogMode(FogFunc func)   { }
+void Gfx_SetFog(cc_bool enabled)         { }
+static void SetFogColor(PackedCol color) { }
+static void SetFogDensity(float value)   { }
+static void SetFogEnd(float value)       { }
+static void SetFogMode(FogFunc func)     { }
 
 void Gfx_SetFaceCulling(cc_bool enabled) {
 	cullingEnabled = enabled;
@@ -599,10 +599,11 @@ void Gfx_ClearColor(PackedCol color) {
 	buffers[1].env.fill_code[0] = packed;
 }
 
-void Gfx_SetDepthTest(cc_bool enabled) {
+static void SetDepthTest(cc_bool enabled) {
+	// TODO
 }
 
-void Gfx_SetDepthWrite(cc_bool enabled) {
+static void SetDepthWrite(cc_bool enabled) {
 	// TODO
 }
 
@@ -1115,7 +1116,7 @@ void Gfx_SetVSync(cc_bool vsync) {
 	gfx_vsync = vsync;
 }
 
-void Gfx_OnWindowResize(void) {
+void Gfx_OnWindowResize(int width, int height) {
 	// TODO
 }
 
