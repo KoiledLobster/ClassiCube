@@ -648,7 +648,13 @@ void Gfx_SetAlphaArgBlend(cc_bool enabled) { }
 
 static void SetDepthTest(cc_bool enabled)  { dirty |= DIRTY_DEPTH; }
 static void SetDepthWrite(cc_bool enabled) { dirty |= DIRTY_DEPTH; }
-static void SetColorWrite(cc_bool r, cc_bool g, cc_bool b, cc_bool a) { dirty |= DIRTY_PIPELINE; }
+/* NOTE: Can't rely on gfx_colorMask, as depth only rendering changes the */
+/*  effective colour write mask without changing gfx_colorMask */
+static int mtl_colorMask = 0xF;
+static void SetColorWrite(cc_bool r, cc_bool g, cc_bool b, cc_bool a) {
+	mtl_colorMask = (r ? 1 : 0) | (g ? 2 : 0) | (b ? 4 : 0) | (a ? 8 : 0);
+	dirty |= DIRTY_PIPELINE;
+}
 
 void Gfx_DepthOnlyRendering(cc_bool depthOnly) {
 	DefaultDepthOnlyRendering(depthOnly);
@@ -799,8 +805,7 @@ static id<MTLRenderPipelineState> GetPipeline(void) {
 		| (gfx_alphaTest  ? PIPE_ALPHATEST : 0)
 		| (gfx_alphaBlend ? PIPE_BLEND     : 0)
 		| (fog << PIPE_FOG_SHIFT)
-		| ((gfx_colorMask[0] ? 1 : 0) << PIPE_MASK_SHIFT) | ((gfx_colorMask[1] ? 2 : 0) << PIPE_MASK_SHIFT)
-		| ((gfx_colorMask[2] ? 4 : 0) << PIPE_MASK_SHIFT) | ((gfx_colorMask[3] ? 8 : 0) << PIPE_MASK_SHIFT);
+		| (mtl_colorMask << PIPE_MASK_SHIFT);
 	/* Texture offset is only used with textured vertices */
 	if (!(idx & PIPE_TEXTURED)) idx &= ~PIPE_TEXOFFSET;
 
