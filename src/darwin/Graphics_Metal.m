@@ -1391,28 +1391,28 @@ void Gfx_DrawIndexedTris_T2fC4b(int verticesCount, int startVertex, DrawHints hi
 /*########################################################################################################################*
 *-----------------------------------------------------------Misc----------------------------------------------------------*
 *#########################################################################################################################*/
-cc_result Gfx_TakeScreenshot(struct Stream* output) {
+/* Copies the current contents of the render target into a CPU accessible buffer */
+/* NOTE: Pixels are in top-down order, and in the same format as BitmapCol */
+static id<MTLBuffer> ReadRenderTarget(int* width, int* height) {
 	id<MTLTexture> tex;
 	id<MTLBuffer> readback;
 	id<MTLBlitCommandEncoder> blit;
-	struct Bitmap bmp;
-	int width, height;
-	cc_result res;
+	int w, h;
 
 	BeginRenderPass();
 	EndRenderPass(true);
 	EndUploads();
 
-	tex    = mtl_target;
-	width  = (int)[tex width];
-	height = (int)[tex height];
-	readback = [mtl_device newBufferWithLength:width * height * 4 options:MTLResourceStorageModeShared];
-	if (!readback) return ERR_OUT_OF_MEMORY;
+	tex = mtl_target;
+	w   = (int)[tex width];
+	h   = (int)[tex height];
+	readback = [mtl_device newBufferWithLength:w * h * 4 options:MTLResourceStorageModeShared];
+	if (!readback) return nil;
 
 	blit = [mtl_cmdBuf blitCommandEncoder];
 	[blit copyFromTexture:tex sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0)
-		sourceSize:MTLSizeMake(width, height, 1) toBuffer:readback destinationOffset:0
-		destinationBytesPerRow:width * 4 destinationBytesPerImage:width * height * 4];
+		sourceSize:MTLSizeMake(w, h, 1) toBuffer:readback destinationOffset:0
+		destinationBytesPerRow:w * 4 destinationBytesPerImage:w * h * 4];
 	[blit endEncoding];
 
 	/* Submit everything rendered so far, then continue the frame in a new command buffer */
@@ -1421,9 +1421,52 @@ cc_result Gfx_TakeScreenshot(struct Stream* output) {
 	[mtl_cmdBuf release];
 	mtl_cmdBuf = [[mtl_queue commandBufferWithUnretainedReferences] retain];
 
+	*width = w; *height = h;
+	return readback;
+}
+
+cc_result Gfx_TakeScreenshot(struct Stream* output) {
+	id<MTLBuffer> readback;
+	struct Bitmap bmp;
+	int width, height;
+	cc_result res;
+
+	readback = ReadRenderTarget(&width, &height);
+	if (!readback) return ERR_OUT_OF_MEMORY;
+
 	Bitmap_Init(bmp, width, height, (BitmapCol*)[readback contents]);
 	res = Png_Encode(&bmp, output, NULL, false, NULL);
 	[readback release];
 	return res;
+}
+
+cc_result Gfx_ReadBackbuffer(struct Bitmap* bmp) {
+	id<MTLBuffer> readback;
+	BitmapCol* src;
+	BitmapCol* dst;
+	int width, height, x, y, srcY;
+
+	readback = ReadRenderTarget(&width, &height);
+	if (!readback) return ERR_OUT_OF_MEMORY;
+	src = (BitmapCol*)[readback contents];
+
+	/* Render target is in pixels, but callers work in window (point) dimensions, */
+	/*  so on high DPI displays the render target is larger than the bitmap. */
+	/* Point sampling is used so that exact colours are preserved */
+	for (y = 0; y < bmp->height; y++) {
+		srcY = (int)((cc_uint64)y * height / bmp->height);
+		dst  = Bitmap_GetRow(bmp, y);
+
+		if (width == bmp->width) {
+			Mem_Copy(dst, src + srcY * width, width * BITMAPCOLOR_SIZE);
+			continue;
+		}
+		for (x = 0; x < bmp->width; x++) {
+			dst[x] = src[srcY * width + (int)((cc_uint64)x * width / bmp->width)];
+		}
+	}
+
+	[readback release];
+	return 0;
 }
 #endif
