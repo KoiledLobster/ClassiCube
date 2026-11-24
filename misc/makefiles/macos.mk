@@ -6,6 +6,14 @@ DIST_NAME	:= ClassiCube
 CFLAGS	:= -fvisibility=hidden -fno-ident -Wno-error=deprecated-declarations
 LDFLAGS	:= -rdynamic
 LIBS 	:= -framework Security -framework Cocoa -framework OpenGL -framework IOKit -lobjc
+# Metal graphics backend (make darwin BUILD_METAL=1)
+ifdef BUILD_METAL
+	BUILD_DIR    := build/macos-metal
+	SOURCE_DIRS  += src/darwin
+	CFLAGS += -DCC_GFX_BACKEND=CC_GFX_BACKEND_METAL
+	LIBS   += -framework Metal -framework QuartzCore
+endif
+
 include misc/makefiles/common_config.mk
 
 

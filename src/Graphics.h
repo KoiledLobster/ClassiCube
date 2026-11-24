@@ -356,6 +356,31 @@ void Gfx_BindVb_Textured(GfxResourceID vb);
 #define Gfx_BindVb_Textured Gfx_BindVb
 #endif
 
+/* Chunk mesh vertex buffers (used by Builder.c and MapRenderer.c) */
+/* With Metal, having thousands of separate buffers (one per chunk) is costly for the */
+/*  driver every frame, so instead chunk meshes are sub-allocated from large shared buffers */
+#if CC_GFX_BACKEND == CC_GFX_BACKEND_METAL
+#define CC_GFX_CHUNK_VB_POOL
+/* Attempts to allocate a chunk mesh with the given number of textured vertices, or 0 if it fails to */
+GfxResourceID Gfx_CreateChunkVb(int count);
+void  Gfx_DeleteChunkVb(GfxResourceID* vb);
+void* Gfx_LockChunkVb(GfxResourceID vb, int count);
+void  Gfx_UnlockChunkVb(GfxResourceID vb);
+/* Sets the active chunk mesh for use with Gfx_DrawChunkVb */
+void  Gfx_BindChunkVb(GfxResourceID vb);
+/* Draws (verticesCount / 4) quads from the active chunk mesh, starting at startVertex */
+void  Gfx_DrawChunkVb(int verticesCount, int startVertex);
+/* Must be called after drawing chunk meshes */
+void  Gfx_EndChunkDraws(void);
+#else
+#define Gfx_CreateChunkVb(count)     Gfx_TryCreateStaticVb(VERTEX_FORMAT_TEXTURED, count)
+#define Gfx_DeleteChunkVb(vb)        Gfx_DeleteVb(vb)
+#define Gfx_LockChunkVb(vb, count)   Gfx_LockVb(vb, VERTEX_FORMAT_TEXTURED, count)
+#define Gfx_UnlockChunkVb(vb)        Gfx_UnlockVb(vb)
+#define Gfx_BindChunkVb(vb)          Gfx_BindVb_Textured(vb)
+#define Gfx_EndChunkDraws()
+#endif
+
 /* Creates a new dynamic vertex buffer, whose contents can be updated later */
 CC_API GfxResourceID Gfx_CreateDynamicVb(VertexFormat fmt, int maxVertices);
 /* Sets the active vertex buffer to the given dynamic vertex buffer */

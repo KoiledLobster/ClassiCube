@@ -107,7 +107,9 @@ static void CheckWeather(float delta) {
 	Gfx_SetAlphaBlending(false);
 }
 
-#ifdef CC_CLIPPING_FLAGS
+#if defined CC_GFX_CHUNK_VB_POOL
+	#define DrawBatch(count, start) Gfx_DrawChunkVb(count, start)
+#elif defined CC_CLIPPING_FLAGS
 	#define DrawBatch(count, start) Gfx_DrawIndexedTris_T2fC4b(count, start, info->skipClip ? DRAW_HINT_NOCLIP : 0)
 #else
 	#define DrawBatch(count, start) Gfx_DrawIndexedTris_T2fC4b(count, start, 0)
@@ -151,7 +153,7 @@ static void RenderNormalBatch(int batch) {
 		hasNormParts[batch] = true;
 
 #if CC_GFX_BACKEND != CC_GFX_BACKEND_GL11
-		Gfx_BindVb_Textured(info->vb);
+		Gfx_BindChunkVb(info->vb);
 #endif
 
 		offset  = part.offset + part.spriteCount;
@@ -219,6 +221,7 @@ void MapRenderer_RenderNormal(float delta) {
 		}
 	}
 	Gfx_DisableMipmaps();
+	Gfx_EndChunkDraws();
 
 	CheckWeather(delta);
 	Gfx_SetAlphaTest(false);
@@ -255,7 +258,7 @@ static void RenderTranslucentBatch(int batch) {
 		hasTranParts[batch] = true;
 
 #if CC_GFX_BACKEND != CC_GFX_BACKEND_GL11
-		Gfx_BindVb_Textured(info->vb);
+		Gfx_BindChunkVb(info->vb);
 #endif
 
 		offset  = part.offset;
@@ -310,6 +313,7 @@ void MapRenderer_RenderTranslucent(float delta) {
 		RenderTranslucentBatch(batch);
 	}
 	Gfx_DisableMipmaps();
+	Gfx_EndChunkDraws();
 
 	Gfx_SetDepthWrite(true);
 	/* If we weren't under water, render weather after to blend properly */
@@ -332,7 +336,7 @@ static void DeleteChunk(struct ChunkInfo* chunk) {
 #if CC_GFX_BACKEND == CC_GFX_BACKEND_GL11
 	int j;
 #else
-	Gfx_DeleteVb(&chunk->vb);
+	Gfx_DeleteChunkVb(&chunk->vb);
 #endif
 
 	chunk->empty  = false; 

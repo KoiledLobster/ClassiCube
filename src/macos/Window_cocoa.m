@@ -12,6 +12,11 @@
 #import  <Foundation/Foundation.h>
 #import  <AppKit/AppKit.h>
 #include <ApplicationServices/ApplicationServices.h>
+#if CC_GFX_BACKEND == CC_GFX_BACKEND_METAL
+#import  <QuartzCore/CAMetalLayer.h>
+extern void Gfx_InitForLayer(CAMetalLayer* layer);
+static CAMetalLayer* metalLayer;
+#endif
 
 #define _NSOKButton 1
 
@@ -291,6 +296,14 @@ static void RefreshWindowBounds(void) {
 	Event_RaiseVoid(&WindowEvents.Resized);
 }
 
+#if CC_GFX_BACKEND == CC_GFX_BACKEND_METAL
+- (void)windowDidChangeBackingProperties:(NSNotification *)notification {
+	// e.g. window moved between a high DPI display and a normal DPI display
+	[metalLayer setContentsScale:[winHandle backingScaleFactor]];
+	Event_RaiseVoid(&WindowEvents.Resized);
+}
+#endif
+
 - (void)windowDidMove:(NSNotification *)notification {
 	RefreshWindowBounds();
 #if CC_GFX_BACKEND_IS_GL()
@@ -422,7 +435,20 @@ static void DoCreateWindow(int width, int height) {
 	canCheckOcclusion = [winHandle respondsToSelector:@selector(occlusionState)];
 }
 void Window_Create2D(int width, int height) { DoCreateWindow(width, height); }
+#if CC_GFX_BACKEND == CC_GFX_BACKEND_METAL
+void Window_Create3D(int width, int height) {
+	DoCreateWindow(width, height);
+
+	// Make the content view a layer-hosting view backed by a CAMetalLayer
+	metalLayer = [[CAMetalLayer layer] retain];
+	[metalLayer setContentsScale:[winHandle backingScaleFactor]];
+	[viewHandle setLayer:metalLayer];
+	[viewHandle setWantsLayer:YES];
+	Gfx_InitForLayer(metalLayer);
+}
+#else
 void Window_Create3D(int width, int height) { DoCreateWindow(width, height); }
+#endif
 
 void Window_Destroy(void) { }
 
@@ -997,6 +1023,19 @@ cc_result Window_ExitFullscreen(void) {
 
 	RefreshWindowBounds();
 	Event_RaiseVoid(&WindowEvents.Resized);
+	return 0;
+}
+#endif
+
+#if CC_GFX_BACKEND == CC_GFX_BACKEND_METAL
+// Metal requires macOS 10.11 or later, so modern toggleFullScreen API is always available
+cc_result Window_EnterFullscreen(void) {
+	[winHandle toggleFullScreen:appHandle];
+	return 0;
+}
+
+cc_result Window_ExitFullscreen(void) {
+	[winHandle toggleFullScreen:appHandle];
 	return 0;
 }
 #endif
