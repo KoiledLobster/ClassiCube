@@ -455,11 +455,10 @@ cc_bool Builder_MakeChunk(struct ChunkInfo* info) {
 
 #if CC_GFX_BACKEND != CC_GFX_BACKEND_GL11
 	/* add an extra element to fix crashing on some GPUs */
-	info->vb = Gfx_TryCreateStaticVb(VERTEX_FORMAT_TEXTURED, totalVerts + 1);
+	info->vb = Gfx_CreateChunkVb(totalVerts + 1);
 	if (!info->vb) return false;
 
-	Builder_Vertices = (struct VertexTextured*)Gfx_LockVb(info->vb,
-													VERTEX_FORMAT_TEXTURED, totalVerts + 1);
+	Builder_Vertices = (struct VertexTextured*)Gfx_LockChunkVb(info->vb, totalVerts + 1);
 #else
 	/* NOTE: Relies on assumption vb is ignored by GL11 Gfx_LockVb implementation */
 	Builder_Vertices = (struct VertexTextured*)Gfx_LockVb(0, 
@@ -493,7 +492,7 @@ cc_bool Builder_MakeChunk(struct ChunkInfo* info) {
 		BuildPartVbs(&MapRenderer_PartsTranslucent[curIdx]);
 	}
 #else
-	Gfx_UnlockVb(info->vb);
+	Gfx_UnlockChunkVb(info->vb);
 #endif
 	return true;
 }
